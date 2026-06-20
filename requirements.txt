@@ -1,0 +1,17 @@
+# Core
+pydantic>=2.7
+pydantic-ai>=0.0.14
+anthropic>=0.40
+
+# Broker
+MetaTrader5>=5.0.45
+
+# Scheduling
+APScheduler>=3.10
+
+# State / infra
+redis>=5.0
+logfire>=0.50
+
+# Config
+python-dotenv>=1.0
