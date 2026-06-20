@@ -196,22 +196,22 @@ async def main() -> None:
     except Exception:
         logger.exception("Failed to configure Logfire")
 
-    client = MT5Client(
+    mt5_client = MT5Client(
         login=int(os.getenv("MT5_LOGIN", "0")),
         password=os.getenv("MT5_PASSWORD", ""),
         server=os.getenv("MT5_SERVER", ""),
         path=os.getenv("MT5_PATH", None),
     )
     state_store = StateStore(os.getenv("REDIS_URL", "redis://localhost:6379/0"))
-    risk_manager = RiskManager()
+    risk_manager = RiskManager(mt5_client)
     asian_breakout = AsianBreakoutStrategy()
     barbell = BarbellStrategy()
     sentiment_agent = SentimentAgent()
 
     try:
-        client.connect()
+        mt5_client.connect()
 
-        scheduler = build_scheduler(client, risk_manager, state_store, asian_breakout, barbell, sentiment_agent)
+        scheduler = build_scheduler(mt5_client, risk_manager, state_store, asian_breakout, barbell, sentiment_agent)
         scheduler.start()
         logger.info("Scheduler started")
 
@@ -223,7 +223,7 @@ async def main() -> None:
         finally:
             scheduler.shutdown(wait=False)
     finally:
-        client.disconnect()
+        mt5_client.disconnect()
 
 
 if __name__ == "__main__":
