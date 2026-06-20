@@ -3,10 +3,18 @@ pydantic>=2.7
 pydantic-ai>=0.0.14
 anthropic>=0.40
 
-# Broker
+# Data & Math
+numpy>=1.26
+pandas>=2.0
+scipy>=1.11
 
 # Scheduling
 APScheduler>=3.10
+
+# Web
+fastapi>=0.110
+uvicorn>=0.29
+requests>=2.31
 
 # State / infra
 redis>=5.0
