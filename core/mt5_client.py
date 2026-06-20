@@ -12,7 +12,12 @@ import logging
 from datetime import datetime
 from typing import List, Optional, Tuple
 
-import MetaTrader5 as mt5
+try:
+    import MetaTrader5 as mt5
+    MT5_AVAILABLE = True
+except Exception:  # pragma: no cover - platform dependent
+    mt5 = None
+    MT5_AVAILABLE = False
 import pandas as pd
 
 from core.models import OrderResult, Position, RiskState, TradeSignal
@@ -52,6 +57,9 @@ class MT5Client:
 
     def connect(self) -> bool:
         """Initialize the terminal and authenticate. Returns ``True`` on success."""
+        if not MT5_AVAILABLE:
+            raise RuntimeError("MetaTrader5 not available on this platform")
+
         try:
             initialized = mt5.initialize(self.path) if self.path else mt5.initialize()
             if not initialized:
@@ -73,6 +81,9 @@ class MT5Client:
 
     def disconnect(self) -> None:
         """Shut down the terminal session."""
+        if not MT5_AVAILABLE:
+            raise RuntimeError("MetaTrader5 not available on this platform")
+
         try:
             if mt5.shutdown():
                 logger.info("MT5 shutdown complete")
@@ -87,6 +98,9 @@ class MT5Client:
 
     def get_account_info(self) -> RiskState:
         """Return account and risk snapshot from the broker."""
+        if not MT5_AVAILABLE:
+            raise RuntimeError("MetaTrader5 not available on this platform")
+
         try:
             self._ensure_connected()
             account_info = mt5.account_info()
@@ -120,6 +134,9 @@ class MT5Client:
 
     def get_current_price(self, symbol: str) -> Tuple[float, float]:
         """Return the latest bid and ask for the requested symbol."""
+        if not MT5_AVAILABLE:
+            raise RuntimeError("MetaTrader5 not available on this platform")
+
         try:
             self._ensure_connected()
             tick = mt5.symbol_info_tick(symbol)
@@ -132,6 +149,9 @@ class MT5Client:
 
     def get_candles(self, symbol: str, timeframe: int, count: int) -> pd.DataFrame:
         """Return recent OHLC bars with time, open, high, low, close, and volume."""
+        if not MT5_AVAILABLE:
+            raise RuntimeError("MetaTrader5 not available on this platform")
+
         try:
             self._ensure_connected()
             rates = mt5.copy_rates_from_pos(symbol, timeframe, 0, count)
@@ -154,6 +174,9 @@ class MT5Client:
 
     def place_market_order(self, signal: TradeSignal) -> OrderResult:
         """Submit a market order for the provided trade signal."""
+        if not MT5_AVAILABLE:
+            raise RuntimeError("MetaTrader5 not available on this platform")
+
         try:
             self._ensure_connected()
             bid, ask = self.get_current_price(signal.symbol)
@@ -201,6 +224,9 @@ class MT5Client:
 
     def close_position(self, ticket: int) -> OrderResult:
         """Close the position identified by the given ticket."""
+        if not MT5_AVAILABLE:
+            raise RuntimeError("MetaTrader5 not available on this platform")
+
         try:
             self._ensure_connected()
             positions = mt5.positions_get(ticket=ticket)
@@ -261,6 +287,9 @@ class MT5Client:
 
     def get_open_positions(self) -> List[Position]:
         """Return active open positions from the broker."""
+        if not MT5_AVAILABLE:
+            raise RuntimeError("MetaTrader5 not available on this platform")
+
         try:
             self._ensure_connected()
             raw_positions = mt5.positions_get()
