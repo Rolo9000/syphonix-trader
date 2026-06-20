@@ -14,7 +14,12 @@ from datetime import datetime, timedelta, time
 from typing import Literal
 from urllib.request import Request, urlopen
 
-import MetaTrader5 as mt5
+try:
+    import MetaTrader5 as mt5
+    MT5_AVAILABLE = True
+except ImportError:  # pragma: no cover - platform dependent
+    mt5 = None
+    MT5_AVAILABLE = False
 import numpy as np
 import pandas as pd
 from scipy.optimize import minimize
