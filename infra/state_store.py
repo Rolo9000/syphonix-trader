@@ -17,7 +17,15 @@ class StateStore:
 
     def __init__(self, redis_url: str, redis_client=None) -> None:
         self.redis_url = redis_url
-        self._redis = redis_client if redis_client is not None else redis.Redis.from_url(redis_url, decode_responses=True)
+        if redis_client is not None:
+            self._redis = redis_client
+        else:
+            # Allow self-signed TLS certs (e.g., Northflank) by disabling cert requirements
+            self._redis = redis.Redis.from_url(
+                redis_url,
+                decode_responses=True,
+                ssl_cert_reqs=None,
+            )
 
     def _safe_execute(self, fn, *args, default=None, **kwargs):
         try:
