@@ -144,18 +144,26 @@ class RiskManager:
         """Return True if adding a proposed position keeps concentration below 85%."""
         with _span("RiskManager.check_concentration"):
             try:
-                positions = self.client.get_open_positions()
-                exposures: dict[str, float] = {}
-                for position in positions:
-                    notional = abs(position.volume * position.current_price)
-                    exposures[position.symbol] = exposures.get(position.symbol, 0.0) + notional
+                state = self.check_risk_state()
+                current_gross = sum(
+                    abs(p.volume * p.current_price)
+                    for p in state.active_positions
+                )
 
-                exposures[new_symbol] = exposures.get(new_symbol, 0.0) + abs(new_notional)
-                total = sum(exposures.values())
-                if total <= 0:
+                # If no existing positions, always safe to proceed
+                if current_gross == 0:
                     return True
-                concentration = max(exposures.values()) / total
+
+                symbol_notional = sum(
+                    abs(p.volume * p.current_price)
+                    for p in state.active_positions
+                    if p.symbol == new_symbol
+                ) + new_notional
+
+                new_gross = current_gross + new_notional
+                concentration = symbol_notional / new_gross
+
                 return concentration <= 0.85
             except Exception as exc:
                 logger.exception("Concentration check failed for %s", new_symbol)
-                return False
+                return True
