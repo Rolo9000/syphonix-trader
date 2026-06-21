@@ -74,7 +74,7 @@ class MT5Client:
 
             terminal_info = mt5.terminal_info()
             if terminal_info is not None:
-                print(f"DEBUG: trade_allowed={terminal_info.trade_allowed}, trade_expert={terminal_info.trade_expert}")
+                print(f"DEBUG: trade_allowed={terminal_info.trade_allowed}")
 
             self._connected = True
             logger.info("MT5 connected: login=%s server=%s", self.login, self.server)
