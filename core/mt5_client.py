@@ -12,6 +12,7 @@ import logging
 from datetime import datetime
 from typing import List, Optional, Tuple
 
+import logfire
 try:
     import MetaTrader5 as mt5
     MT5_AVAILABLE = True
@@ -71,20 +72,9 @@ class MT5Client:
                 error = mt5.last_error()
                 raise RuntimeError(f"MT5 login failed: {error}")
 
-            # Enable AutoTrading programmatically
             terminal_info = mt5.terminal_info()
-            if terminal_info is not None and not terminal_info.trade_allowed:
-                logfire.warn("AutoTrading is disabled - attempting to enable via terminal settings")
-
-            mt5.initialize(
-                path=self.path if self.path else None,
-                login=self.login,
-                password=self.password,
-                server=self.server,
-                trade_allowed=True,
-            )
-
-            logfire.info(f"Terminal AutoTrading status: {mt5.terminal_info().trade_allowed}")
+            if terminal_info is not None:
+                print(f"DEBUG: trade_allowed={terminal_info.trade_allowed}, trade_expert={terminal_info.trade_expert}")
 
             self._connected = True
             logger.info("MT5 connected: login=%s server=%s", self.login, self.server)
