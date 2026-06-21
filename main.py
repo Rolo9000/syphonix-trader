@@ -79,6 +79,26 @@ async def execute_trading_cycle(
                     continue
 
                 result = client.place_market_order(signal)
+                try:
+                    logfire.info(
+                        f"Order attempt: {signal.action} {signal.symbol} vol={signal.volume:.4f} confidence={signal.confidence:.2f}"
+                    )
+                except Exception:
+                    logger.debug("logfire info unavailable for order attempt logging")
+
+                if result.success:
+                    try:
+                        logfire.info(f"ORDER PLACED: {signal.symbol} ticket={result.ticket}")
+                    except Exception:
+                        logger.debug("logfire info unavailable for placed order logging")
+                else:
+                    try:
+                        logfire.error(
+                            f"ORDER FAILED: {signal.symbol} error={result.error_code} msg={result.error_msg}"
+                        )
+                    except Exception:
+                        logger.debug("logfire error unavailable for failed order logging")
+
                 logger.info(
                     "Executed signal %s %s %s lots: success=%s code=%s comment=%s",
                     signal.strategy_name,

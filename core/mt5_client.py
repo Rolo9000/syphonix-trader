@@ -196,6 +196,11 @@ class MT5Client:
                 "type_time": mt5.ORDER_TIME_GTC,
             }
 
+            try:
+                logfire.info(f"Sending order: {request}")
+            except Exception:
+                logger.debug("logfire unavailable for sending order logging")
+
             result = mt5.order_send(request)
             if result is None:
                 raise RuntimeError("MT5 order_send returned no result")
