@@ -188,10 +188,33 @@ class MT5Client:
             order_type = mt5.ORDER_TYPE_BUY if signal.action == "BUY" else mt5.ORDER_TYPE_SELL
             price = ask if order_type == mt5.ORDER_TYPE_BUY else bid
 
+            symbol_info = mt5.symbol_info(signal.symbol)
+            if symbol_info is None:
+                return OrderResult(
+                    success=False,
+                    ticket=None,
+                    error_code=-1,
+                    error_msg=f"Symbol {signal.symbol} not found",
+                    symbol=signal.symbol,
+                    volume=signal.volume,
+                    price=signal.entry_price,
+                )
+
+            volume_step = float(symbol_info.volume_step)
+            volume_min = float(symbol_info.volume_min)
+            volume_max = float(symbol_info.volume_max)
+
+            volume = round(round(signal.volume / volume_step) * volume_step, 8)
+            volume = max(volume_min, min(volume_max, volume))
+
+            print(
+                f"DEBUG: Volume normalized from {signal.volume} to {volume} (step={volume_step}, min={volume_min}, max={volume_max})"
+            )
+
             request = {
                 "action": mt5.TRADE_ACTION_DEAL,
                 "symbol": signal.symbol,
-                "volume": float(signal.volume),
+                "volume": float(volume),
                 "type": order_type,
                 "price": price,
                 "sl": float(signal.stop_loss),
