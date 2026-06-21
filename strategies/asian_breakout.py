@@ -45,7 +45,16 @@ def _span(name: str):
 class AsianBreakoutStrategy:
     """Range-breakout strategy keyed on the Asian trading session."""
 
-    symbols: List[str] = ["USDJPY", "AUDUSD", "NZDUSD"]
+    symbols: List[str] = [
+        "EURUSD",
+        "GBPUSD",
+        "USDCHF",
+        "USDJPY",
+        "USDCAD",
+        "AUDUSD",
+        "EURGBP",
+        "EURCHF",
+    ]
     min_range_pips: float = 20.0
     risk_per_trade: float = 0.008
     atr_period: int = 14

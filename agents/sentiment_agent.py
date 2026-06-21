@@ -111,12 +111,24 @@ class SentimentAgent:
         Uses a free NewsAPI demo endpoint and returns the top 10 headline titles.
         """
         with _span("sentiment_agent.fetch_headlines"):
-            terms = {
+            symbol_map = {
                 "XAUUSD": "gold price",
+                "XAGUSD": "silver price",
                 "BTCUSD": "bitcoin",
-                "USDJPY": "USD JPY",
+                "ETHUSD": "ethereum",
+                "SOLUSD": "solana",
+                "XRPUSD": "ripple XRP",
+                "BARUSD": "BAR token",
+                "EURUSD": "euro dollar",
+                "GBPUSD": "pound dollar",
+                "USDJPY": "dollar yen",
+                "USDCHF": "dollar swiss franc",
+                "USDCAD": "dollar canadian",
+                "AUDUSD": "australian dollar",
+                "EURGBP": "euro pound",
+                "EURCHF": "euro swiss franc",
             }
-            query = terms.get(symbol, symbol)
+            query = symbol_map.get(symbol, symbol)
             encoded = quote_plus(query)
             url = (
                 f"https://newsapi.org/v2/everything?q={encoded}&pageSize=10"

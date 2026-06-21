@@ -20,7 +20,7 @@ except ImportError:  # pragma: no cover - platform dependent
     MT5_AVAILABLE = False
 import pandas as pd
 
-from core.indicators import calculate_portfolio_weights
+from core.indicators import calculate_atr, calculate_portfolio_weights
 from core.models import TradeSignal
 from core.mt5_client import MT5Client
 from core.risk_manager import RiskManager
@@ -42,9 +42,25 @@ def _span(name: str):
 class BarbellStrategy:
     """Two-leg barbell allocation with drift-triggered rebalancing."""
 
-    symbols: List[str] = ["XAUUSD", "BTCUSD"]
+    symbols: List[str] = [
+        "XAUUSD",
+        "XAGUSD",
+        "BTCUSD",
+        "ETHUSD",
+        "SOLUSD",
+        "XRPUSD",
+        "BARUSD",
+    ]
     rebalance_threshold: float = 0.05
-    target_weights: Dict[str, float] = {"XAUUSD": 0.75, "BTCUSD": 0.25}
+    target_weights: Dict[str, float] = {
+        "XAUUSD": 0.35,
+        "XAGUSD": 0.15,
+        "BTCUSD": 0.20,
+        "ETHUSD": 0.10,
+        "SOLUSD": 0.08,
+        "XRPUSD": 0.07,
+        "BARUSD": 0.05,
+    }
     total_allocation_pct: float = 0.30
 
     def __init__(
@@ -143,8 +159,22 @@ class BarbellStrategy:
 
                     action = "BUY" if notional_diff > 0 else "SELL"
                     entry_price = float(current_price)
-                    stop_loss = float(entry_price * (0.99 if action == "BUY" else 1.01))
-                    take_profit = float(entry_price * (1.02 if action == "BUY" else 0.98))
+                    try:
+                        candles = client.get_candles(symbol, mt5.TIMEFRAME_H1, 20)
+                        atr = calculate_atr(candles)
+                        if atr is None or atr <= 0.0:
+                            raise ValueError("ATR calculation returned invalid value")
+                    except Exception:
+                        logger.warning("ATR calculation failed for %s, using fallback volatility", symbol)
+                        atr = float(entry_price) * 0.01
+
+                    if action == "BUY":
+                        stop_loss = float(entry_price - atr * 1.5)
+                        take_profit = float(entry_price + atr * 2.0)
+                    else:
+                        stop_loss = float(entry_price + atr * 1.5)
+                        take_profit = float(entry_price - atr * 2.0)
+
                     stop_loss_pips = float(abs(entry_price - stop_loss) * (100.0 if symbol.endswith("JPY") else 10000.0))
                     volume = float(risk_manager.calculate_position_size(symbol, stop_loss_pips, risk_manager.risk_per_trade))
                     if volume <= 0.0:
@@ -159,7 +189,7 @@ class BarbellStrategy:
                             take_profit=take_profit,
                             volume=volume,
                             strategy_name="BarbellRebalance",
-                            confidence=0.5,
+                            confidence=0.75,
                             timestamp=datetime.utcnow(),
                         )
                     )
