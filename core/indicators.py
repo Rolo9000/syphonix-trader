@@ -179,21 +179,32 @@ def calculate_portfolio_weights(returns_dict: dict[str, pd.Series]) -> dict[str,
         return {symbol: float(weight) for symbol, weight in zip(symbols, weights)}
 
 
+_NEWS_BLACKOUT_CACHE: dict[str, object] = {}
+
+
 def is_news_blackout(minutes_before: int = 30, minutes_after: int = 15) -> bool:
     """Return True if a high-impact economic event is within the blackout window."""
     with _span("is_news_blackout"):
         now = datetime.utcnow()
-        start_window = now - timedelta(minutes=minutes_before)
-        end_window = now + timedelta(minutes=minutes_after)
-        urls = [
-            "https://cdn-nfs.faireconomy.media/ff_calendar_thisweek.json",
-            "https://cdn-nfs.faireconomy.media/ff_calendar_thisweek.json?overridezone=0",
-        ]
+        cache_key = f"{minutes_before}:{minutes_after}"
+        cached = _NEWS_BLACKOUT_CACHE.get(cache_key)
+        if cached is not None:
+            cached_time = cached["timestamp"]
+            if now - cached_time < timedelta(minutes=10):
+                return bool(cached["value"])
 
+        urls = [
+            "https://nfs.faireconomy.media/ff_calendar_thisweek.json",
+            "https://cdn-nfs.faireconomy.media/ff_calendar_thisweek.json",
+        ]
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        }
+        blackout = False
         for url in urls:
             try:
-                request = Request(url, headers={"User-Agent": "Mozilla/5.0"})
-                with urlopen(request, timeout=10) as response:
+                request = Request(url, headers=headers)
+                with urlopen(request, timeout=5) as response:
                     if response.status != 200:
                         continue
                     payload = json.loads(response.read().decode("utf-8"))
@@ -202,8 +213,8 @@ def is_news_blackout(minutes_before: int = 30, minutes_after: int = 15) -> bool:
                         continue
 
                     for event in events:
-                        impact = str(event.get("impact", "")).lower()
-                        if "high" not in impact:
+                        impact = str(event.get("impact", ""))
+                        if impact != "High":
                             continue
 
                         event_time = event.get("utc") or event.get("date") or event.get("time")
@@ -213,10 +224,21 @@ def is_news_blackout(minutes_before: int = 30, minutes_after: int = 15) -> bool:
                         event_dt = pd.to_datetime(event_time, utc=True)
                         if event_dt.tzinfo is None:
                             event_dt = event_dt.tz_localize("UTC")
-                        if start_window <= event_dt.to_pydatetime() <= end_window:
-                            return True
+
+                        if now - timedelta(minutes=minutes_after) <= event_dt.to_pydatetime() <= now + timedelta(minutes=minutes_before):
+                            blackout = True
+                            break
+                    if blackout:
+                        break
             except Exception:
-                logger.exception("News blackout check failed for URL %s", url)
+                logger.warning("News blackout URL failed: %s; trying next source", url)
                 continue
 
-        return False
+        if not blackout:
+            logger.debug("No high-impact events in blackout window; allowing trading")
+
+        _NEWS_BLACKOUT_CACHE[cache_key] = {
+            "timestamp": now,
+            "value": blackout,
+        }
+        return blackout

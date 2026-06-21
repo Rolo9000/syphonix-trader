@@ -158,4 +158,5 @@ class AsianBreakoutStrategy:
                         )
                 except Exception:
                     logger.exception("Failed to generate signal for %s", symbol)
+                    continue
         return signals

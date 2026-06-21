@@ -80,16 +80,20 @@ class BarbellStrategy:
         with _span("BarbellStrategy.update_weights_mvo"):
             returns: Dict[str, pd.Series] = {}
             for symbol in self.symbols:
-                candles = client.get_candles(symbol, mt5.TIMEFRAME_D1, 30)
-                if candles.empty or "close" not in candles.columns:
-                    logger.warning("Insufficient daily candles for %s", symbol)
+                try:
+                    candles = client.get_candles(symbol, mt5.TIMEFRAME_D1, 30)
+                    if candles.empty or "close" not in candles.columns:
+                        logger.warning("Insufficient daily candles for %s", symbol)
+                        continue
+                    close = candles["close"].astype(float)
+                    daily_returns = close.pct_change().dropna()
+                    if daily_returns.empty:
+                        logger.warning("Insufficient return data for %s", symbol)
+                        continue
+                    returns[symbol] = daily_returns
+                except Exception:
+                    logger.exception("Failed to collect returns for %s", symbol)
                     continue
-                close = candles["close"].astype(float)
-                daily_returns = close.pct_change().dropna()
-                if daily_returns.empty:
-                    logger.warning("Insufficient return data for %s", symbol)
-                    continue
-                returns[symbol] = daily_returns
 
             if not returns:
                 logger.warning("No returns data available for MVO update")
@@ -123,39 +127,43 @@ class BarbellStrategy:
             current_weights = self.get_current_weights(client)
 
             for symbol in self.symbols:
-                target_weight = float(self.target_weights.get(symbol, 0.0))
-                actual_weight = float(current_weights.get(symbol, 0.0))
-                drift = float(actual_weight - target_weight)
-                if abs(drift) <= float(self.rebalance_threshold):
-                    continue
+                try:
+                    target_weight = float(self.target_weights.get(symbol, 0.0))
+                    actual_weight = float(current_weights.get(symbol, 0.0))
+                    drift = float(actual_weight - target_weight)
+                    if abs(drift) <= float(self.rebalance_threshold):
+                        continue
 
-                current_price = float(client.get_current_price(symbol)[0])
-                desired_notional = float(allocation_amount) * target_weight
-                current_notional = float(current_exposures.get(symbol, 0.0))
-                notional_diff = float(desired_notional - current_notional)
-                if abs(notional_diff) < float(current_price) * 0.0001:
-                    continue
+                    current_price = float(client.get_current_price(symbol)[0])
+                    desired_notional = float(allocation_amount) * target_weight
+                    current_notional = float(current_exposures.get(symbol, 0.0))
+                    notional_diff = float(desired_notional - current_notional)
+                    if abs(notional_diff) < float(current_price) * 0.0001:
+                        continue
 
-                action = "BUY" if notional_diff > 0 else "SELL"
-                entry_price = float(current_price)
-                stop_loss = float(entry_price * (0.99 if action == "BUY" else 1.01))
-                take_profit = float(entry_price * (1.02 if action == "BUY" else 0.98))
-                stop_loss_pips = float(abs(entry_price - stop_loss) * (100.0 if symbol.endswith("JPY") else 10000.0))
-                volume = float(risk_manager.calculate_position_size(symbol, stop_loss_pips, risk_manager.risk_per_trade))
-                if volume <= 0.0:
-                    continue
+                    action = "BUY" if notional_diff > 0 else "SELL"
+                    entry_price = float(current_price)
+                    stop_loss = float(entry_price * (0.99 if action == "BUY" else 1.01))
+                    take_profit = float(entry_price * (1.02 if action == "BUY" else 0.98))
+                    stop_loss_pips = float(abs(entry_price - stop_loss) * (100.0 if symbol.endswith("JPY") else 10000.0))
+                    volume = float(risk_manager.calculate_position_size(symbol, stop_loss_pips, risk_manager.risk_per_trade))
+                    if volume <= 0.0:
+                        continue
 
-                signals.append(
-                    TradeSignal(
-                        symbol=symbol,
-                        action=action,
-                        entry_price=entry_price,
-                        stop_loss=stop_loss,
-                        take_profit=take_profit,
-                        volume=volume,
-                        strategy_name="BarbellRebalance",
-                        confidence=0.5,
-                        timestamp=datetime.utcnow(),
+                    signals.append(
+                        TradeSignal(
+                            symbol=symbol,
+                            action=action,
+                            entry_price=entry_price,
+                            stop_loss=stop_loss,
+                            take_profit=take_profit,
+                            volume=volume,
+                            strategy_name="BarbellRebalance",
+                            confidence=0.5,
+                            timestamp=datetime.utcnow(),
+                        )
                     )
-                )
+                except Exception:
+                    logger.exception("Failed to generate rebalance signal for %s", symbol)
+                    continue
         return signals
