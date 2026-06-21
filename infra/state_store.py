@@ -20,14 +20,22 @@ class StateStore:
         if redis_client is not None:
             self._redis = redis_client
         else:
-            # Allow self-signed TLS certs (e.g., Northflank) by disabling cert requirements
-            self._redis = redis.Redis.from_url(
-                redis_url,
-                decode_responses=True,
-                ssl_cert_reqs=None,
-            )
+            try:
+                # Allow self-signed TLS certs on Windows/Northflank and use SSL.
+                self._redis = redis.Redis.from_url(
+                    redis_url,
+                    decode_responses=True,
+                    ssl_cert_reqs=None,
+                    ssl=True,
+                )
+            except Exception as exc:
+                logger.warning("Redis initialization failed: %s", exc)
+                self._redis = None
 
     def _safe_execute(self, fn, *args, default=None, **kwargs):
+        if self._redis is None:
+            logger.warning("Redis unavailable; skipping operation")
+            return default
         try:
             return fn(*args, **kwargs)
         except Exception as exc:
@@ -82,17 +90,23 @@ class StateStore:
             return None
 
     def set_emergency_stop(self, value: bool) -> None:
+        if self._redis is None:
+            logger.warning("Redis unavailable; skipping emergency stop update")
+            return
         try:
             self._redis.set("system:emergency_stop", "1" if value else "0")
         except Exception as exc:
-            logger.error("Redis error: %s", exc)
+            logger.warning("Redis error: %s", exc)
 
     def is_emergency_stop(self) -> bool:
+        if self._redis is None:
+            logger.warning("Redis unavailable; assuming emergency stop is off")
+            return False
         try:
             val = self._redis.get("system:emergency_stop")
             return val in ("1", b"1")
         except Exception as exc:
-            logger.error("Redis error: %s", exc)
+            logger.warning("Redis error: %s", exc)
             return False
 
     def save_peak_equity(self, equity: float) -> None:
