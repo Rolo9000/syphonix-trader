@@ -201,8 +201,11 @@ class MT5Client:
             except Exception:
                 logger.debug("logfire unavailable for sending order logging")
 
+            print(f"DEBUG MT5: Placing {signal.action} order for {signal.symbol} vol={signal.volume}")
             result = mt5.order_send(request)
+            print(f"DEBUG MT5: order_send result = {result}")
             if result is None:
+                print(f"DEBUG MT5: order_send returned None, last_error={mt5.last_error()}")
                 raise RuntimeError("MT5 order_send returned no result")
 
             success = getattr(result, "retcode", 0) == mt5.TRADE_RETCODE_DONE
