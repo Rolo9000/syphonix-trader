@@ -117,7 +117,7 @@ class RiskManager:
 
                 if state.margin_usage_pct > 85.0:
                     return False, f"Margin usage {state.margin_usage_pct:.1f}% exceeds 85%"
-                if state.leverage_ratio > 27.0:
+                if len(state.active_positions) > 0 and state.leverage_ratio > 27.0:
                     return False, f"Leverage {state.leverage_ratio:.1f}x exceeds 27x"
                 if state.current_drawdown_pct > 15.0:
                     return False, f"Drawdown {state.current_drawdown_pct:.1f}% exceeds 15%"
