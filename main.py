@@ -68,6 +68,15 @@ async def execute_trading_cycle(
         except Exception:
             logger.exception("Barbell rebalance signal generation failed")
 
+        try:
+            logfire.info(f"Total signals generated: {len(signals)}")
+            for s in signals:
+                logfire.info(
+                    f"Signal: {s.strategy_name} {s.action} {s.symbol} confidence={s.confidence} volume={s.volume}"
+                )
+        except Exception:
+            logger.debug("logfire unavailable for signal summary logging")
+
         for signal in signals:
             try:
                 if float(signal.confidence) <= 0.6:
