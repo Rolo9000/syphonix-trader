@@ -197,7 +197,7 @@ class MT5Client:
                 "sl": float(signal.stop_loss),
                 "tp": float(signal.take_profit),
                 "deviation": 20,
-                "type_filling": mt5.ORDER_FILLING_FOK,
+                "type_filling": mt5.ORDER_FILLING_IOC,
                 "type_time": mt5.ORDER_TIME_GTC,
             }
 
