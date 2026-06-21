@@ -71,6 +71,21 @@ class MT5Client:
                 error = mt5.last_error()
                 raise RuntimeError(f"MT5 login failed: {error}")
 
+            # Enable AutoTrading programmatically
+            terminal_info = mt5.terminal_info()
+            if terminal_info is not None and not terminal_info.trade_allowed:
+                logfire.warn("AutoTrading is disabled - attempting to enable via terminal settings")
+
+            mt5.initialize(
+                path=self.path if self.path else None,
+                login=self.login,
+                password=self.password,
+                server=self.server,
+                trade_allowed=True,
+            )
+
+            logfire.info(f"Terminal AutoTrading status: {mt5.terminal_info().trade_allowed}")
+
             self._connected = True
             logger.info("MT5 connected: login=%s server=%s", self.login, self.server)
             return True
@@ -202,6 +217,20 @@ class MT5Client:
                 logger.debug("logfire unavailable for sending order logging")
 
             print(f"DEBUG MT5: Placing {signal.action} order for {signal.symbol} vol={signal.volume}")
+            terminal = mt5.terminal_info()
+            if terminal and not terminal.trade_allowed:
+                mt5.terminal_info()  # refresh
+                logfire.error("AutoTrading still disabled")
+                return OrderResult(
+                    success=False,
+                    ticket=None,
+                    error_code=10027,
+                    error_msg="AutoTrading disabled",
+                    symbol=signal.symbol,
+                    volume=signal.volume,
+                    price=signal.entry_price,
+                )
+
             result = mt5.order_send(request)
             print(f"DEBUG MT5: order_send result = {result}")
             if result is None:
