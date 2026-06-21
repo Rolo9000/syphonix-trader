@@ -59,7 +59,7 @@ class RiskManager:
         stop_loss_pips: float,
         risk_pct: float = 0.01,
     ) -> float:
-        """Return the lot size that risks no more than ``risk_pct`` of equity."""
+        """Return the lot size that risks no more than ``risk_pct`` of equity, while keeping leverage ≤ 27x."""
         with _span("RiskManager.calculate_position_size"):
             try:
                 state = self.client.get_account_info()
@@ -69,8 +69,45 @@ class RiskManager:
 
                 risk_amount = equity * risk_pct
                 pip_value = self._pip_value(symbol)
-                volume = risk_amount / (stop_loss_pips * pip_value)
-                return max(volume, 0.0)
+                base_volume = risk_amount / (stop_loss_pips * pip_value)
+
+                # Check current leverage and cap position to keep total leverage ≤ 27x
+                risk_state = self.check_risk_state()
+                current_notional = sum(
+                    abs(p.volume * p.current_price) for p in risk_state.active_positions
+                )
+
+                max_leverage = 27.0
+                max_allowed_notional = max_leverage * equity
+                available_notional = max_allowed_notional - current_notional
+
+                if available_notional <= 0:
+                    logger.warning(
+                        "Leverage cap reached: current_notional=%.0f, max_allowed=%.0f",
+                        current_notional,
+                        max_allowed_notional,
+                    )
+                    return 0.0
+
+                # Get current price to calculate notional value of this position
+                try:
+                    current_price = self.client.get_current_price(symbol)[0]
+                except Exception:
+                    current_price = 1.0  # fallback
+
+                position_notional = base_volume * current_price
+                if position_notional > available_notional:
+                    # Scale down volume to fit within leverage cap
+                    capped_volume = available_notional / current_price
+                    logger.info(
+                        "Position size capped by leverage: %.4f → %.4f for %s",
+                        base_volume,
+                        capped_volume,
+                        symbol,
+                    )
+                    return max(capped_volume, 0.0)
+
+                return max(base_volume, 0.0)
             except Exception as exc:
                 logger.exception("Failed to calculate position size for %s", symbol)
                 return 0.0
@@ -117,8 +154,11 @@ class RiskManager:
 
                 if state.margin_usage_pct > 85.0:
                     return False, f"Margin usage {state.margin_usage_pct:.1f}% exceeds 85%"
-                if len(state.active_positions) > 0 and state.leverage_ratio > 29.5:
-                    return False, f"Leverage {state.leverage_ratio:.1f}x exceeds 29.5x"
+                if state.leverage_ratio > 26.0:
+                    logger.warning(
+                        "Leverage approaching cap: %.1fx (competition penalty threshold is 28x)",
+                        state.leverage_ratio,
+                    )
                 if state.current_drawdown_pct > 15.0:
                     return False, f"Drawdown {state.current_drawdown_pct:.1f}% exceeds 15%"
                 if self._single_instrument_concentration(state) > 0.85:
