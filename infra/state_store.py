@@ -21,12 +21,17 @@ class StateStore:
             self._redis = redis_client
         else:
             try:
-                # Allow self-signed TLS certs on Windows/Northflank.
-                self._redis = redis.Redis.from_url(
-                    redis_url,
-                    decode_responses=True,
-                    ssl_cert_reqs=None,
-                )
+                if redis_url.startswith("rediss://"):
+                    self._redis = redis.Redis.from_url(
+                        redis_url,
+                        decode_responses=True,
+                        ssl_cert_reqs=None,
+                    )
+                else:
+                    self._redis = redis.Redis.from_url(
+                        redis_url,
+                        decode_responses=True,
+                    )
             except Exception as exc:
                 logger.warning("Redis initialization failed: %s", exc)
                 self._redis = None
