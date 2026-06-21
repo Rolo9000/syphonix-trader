@@ -76,14 +76,19 @@ async def execute_trading_cycle(
 
         for signal in signals:
             try:
+                print(f"DEBUG: Processing signal {signal.symbol} confidence={signal.confidence}")
                 if float(signal.confidence) <= 0.6:
+                    print(f"DEBUG: Filtered by confidence: {signal.confidence}")
                     continue
 
                 notional = float(signal.volume) * float(signal.entry_price)
+                print(f"DEBUG: Checking concentration for {signal.symbol} notional={notional}")
                 if not risk_manager.check_concentration(signal.symbol, notional):
+                    print(f"DEBUG: Concentration FAILED for {signal.symbol}")
                     logger.warning("Concentration check failed for %s", signal.symbol)
                     continue
 
+                print(f"DEBUG: Placing order for {signal.symbol}")
                 result = client.place_market_order(signal)
                 try:
                     logfire.info(
