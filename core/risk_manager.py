@@ -35,7 +35,7 @@ class RiskManager:
     def __init__(
         self,
         client: MT5Client,
-        risk_per_trade: float = 0.01,
+        risk_per_trade: float = 0.02,
         max_daily_drawdown: float = 0.05,
         max_open_positions: int = 5,
     ) -> None:
@@ -117,8 +117,8 @@ class RiskManager:
 
                 if state.margin_usage_pct > 85.0:
                     return False, f"Margin usage {state.margin_usage_pct:.1f}% exceeds 85%"
-                if len(state.active_positions) > 0 and state.leverage_ratio > 27.0:
-                    return False, f"Leverage {state.leverage_ratio:.1f}x exceeds 27x"
+                if len(state.active_positions) > 0 and state.leverage_ratio > 29.5:
+                    return False, f"Leverage {state.leverage_ratio:.1f}x exceeds 29.5x"
                 if state.current_drawdown_pct > 15.0:
                     return False, f"Drawdown {state.current_drawdown_pct:.1f}% exceeds 15%"
                 if self._single_instrument_concentration(state) > 0.85:

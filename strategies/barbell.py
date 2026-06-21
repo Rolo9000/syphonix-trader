@@ -49,19 +49,17 @@ class BarbellStrategy:
         "ETHUSD",
         "SOLUSD",
         "XRPUSD",
-        "BARUSD",
     ]
     rebalance_threshold: float = 0.05
     target_weights: Dict[str, float] = {
-        "XAUUSD": 0.35,
-        "XAGUSD": 0.15,
-        "BTCUSD": 0.20,
-        "ETHUSD": 0.10,
-        "SOLUSD": 0.08,
-        "XRPUSD": 0.07,
-        "BARUSD": 0.05,
+        "XAUUSD": 0.30,
+        "XAGUSD": 0.10,
+        "BTCUSD": 0.25,
+        "ETHUSD": 0.15,
+        "SOLUSD": 0.10,
+        "XRPUSD": 0.10,
     }
-    total_allocation_pct: float = 0.30
+    total_allocation_pct: float = 0.70
 
     def __init__(
         self,

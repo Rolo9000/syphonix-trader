@@ -139,7 +139,7 @@ class AsianBreakoutStrategy:
                                 take_profit=take_profit,
                                 volume=volume,
                                 strategy_name="AsianBreakout",
-                                confidence=0.6,
+                                confidence=0.75,
                                 timestamp=datetime.utcnow(),
                             )
                         )
@@ -161,7 +161,7 @@ class AsianBreakoutStrategy:
                                 take_profit=take_profit,
                                 volume=volume,
                                 strategy_name="AsianBreakout",
-                                confidence=0.6,
+                                confidence=0.75,
                                 timestamp=datetime.utcnow(),
                             )
                         )

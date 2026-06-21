@@ -244,11 +244,47 @@ class MT5Client:
                     price=signal.entry_price,
                 )
 
-            result = mt5.order_send(request)
-            print(f"DEBUG MT5: order_send result = {result}")
-            if result is None:
-                print(f"DEBUG MT5: order_send returned None, last_error={mt5.last_error()}")
-                raise RuntimeError("MT5 order_send returned no result")
+            # Retry logic for rejected orders
+            import time
+
+            max_retries = 3
+            retry_count = 0
+            result = None
+
+            while retry_count <= max_retries:
+                result = mt5.order_send(request)
+                print(f"DEBUG MT5: order_send result = {result}")
+                if result is None:
+                    print(f"DEBUG MT5: order_send returned None, last_error={mt5.last_error()}")
+                    raise RuntimeError("MT5 order_send returned no result")
+
+                retcode = getattr(result, "retcode", 0)
+
+                # Check for success
+                if retcode == mt5.TRADE_RETCODE_DONE:
+                    break
+
+                # Retry on specific error codes
+                if retcode in (10006, 10004):  # 10006=order not filled, 10004=requote
+                    if retry_count < max_retries:
+                        logger.warning(
+                            "Order rejected (code %s), retrying in 2 seconds (attempt %d/%d)",
+                            retcode,
+                            retry_count + 1,
+                            max_retries,
+                        )
+                        time.sleep(2)
+                        retry_count += 1
+                        continue
+                elif retcode in (10014, 10018):  # Liquidity issues
+                    if retry_count < max_retries:
+                        logger.warning("Liquidity issue (code %s), waiting 500ms", retcode)
+                        time.sleep(0.5)
+                        retry_count += 1
+                        continue
+
+                # For other errors, break out
+                break
 
             success = getattr(result, "retcode", 0) == mt5.TRADE_RETCODE_DONE
             return OrderResult(

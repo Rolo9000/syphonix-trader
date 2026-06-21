@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+from datetime import datetime
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from dotenv import load_dotenv
@@ -44,6 +45,12 @@ async def execute_trading_cycle(
     barbell: BarbellStrategy,
 ) -> None:
     with _span("main.execute_trading_cycle"):
+        # Detect market open (21:58 - 22:05 UTC) and wait for liquidity
+        now = datetime.utcnow()
+        if 21 <= now.hour and 58 <= now.minute or (22 <= now.hour and now.minute <= 5):
+            logger.info("Market open detected (21:58-22:05 UTC); waiting 60 seconds for liquidity")
+            await asyncio.sleep(60)
+
         if state_store.is_emergency_stop():
             logger.warning("Emergency stop is active; skipping trading cycle")
             return
@@ -68,27 +75,16 @@ async def execute_trading_cycle(
         except Exception:
             logger.exception("Barbell rebalance signal generation failed")
 
-        print(f"DEBUG: Total signals generated: {len(signals)}")
-        for s in signals:
-            print(
-                f"DEBUG Signal: {s.strategy_name} {s.action} {s.symbol} confidence={s.confidence} volume={s.volume}"
-            )
-
         for signal in signals:
             try:
-                print(f"DEBUG: Processing signal {signal.symbol} confidence={signal.confidence}")
                 if float(signal.confidence) <= 0.6:
-                    print(f"DEBUG: Filtered by confidence: {signal.confidence}")
                     continue
 
                 notional = float(signal.volume) * float(signal.entry_price)
-                print(f"DEBUG: Checking concentration for {signal.symbol} notional={notional}")
                 if not risk_manager.check_concentration(signal.symbol, notional):
-                    print(f"DEBUG: Concentration FAILED for {signal.symbol}")
                     logger.warning("Concentration check failed for %s", signal.symbol)
                     continue
 
-                print(f"DEBUG: Placing order for {signal.symbol}")
                 result = client.place_market_order(signal)
                 try:
                     logfire.info(
