@@ -12,7 +12,8 @@ import math
 from contextlib import nullcontext
 from datetime import datetime, timedelta, time
 from typing import Literal
-from urllib.request import Request, urlopen
+
+import requests
 
 try:
     import MetaTrader5 as mt5
@@ -198,40 +199,45 @@ def is_news_blackout(minutes_before: int = 30, minutes_after: int = 15) -> bool:
             "https://cdn-nfs.faireconomy.media/ff_calendar_thisweek.json",
         ]
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "application/json, text/plain, */*",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Referer": "https://www.forexfactory.com/",
         }
         blackout = False
         for url in urls:
             try:
-                request = Request(url, headers=headers)
-                with urlopen(request, timeout=5) as response:
-                    if response.status != 200:
+                response = requests.get(url, headers=headers, timeout=5)
+                if response.status_code != 200:
+                    continue
+                payload = response.json()
+                events = payload.get("events") if isinstance(payload, dict) else payload
+                if not events:
+                    continue
+
+                for event in events:
+                    impact = str(event.get("impact", ""))
+                    if impact != "High":
                         continue
-                    payload = json.loads(response.read().decode("utf-8"))
-                    events = payload.get("events") if isinstance(payload, dict) else payload
-                    if not events:
+
+                    event_time = event.get("utc") or event.get("date") or event.get("time")
+                    if event_time is None:
                         continue
 
-                    for event in events:
-                        impact = str(event.get("impact", ""))
-                        if impact != "High":
-                            continue
+                    event_dt = pd.to_datetime(event_time, utc=True)
+                    if event_dt.tzinfo is None:
+                        event_dt = event_dt.tz_localize("UTC")
 
-                        event_time = event.get("utc") or event.get("date") or event.get("time")
-                        if event_time is None:
-                            continue
-
-                        event_dt = pd.to_datetime(event_time, utc=True)
-                        if event_dt.tzinfo is None:
-                            event_dt = event_dt.tz_localize("UTC")
-
-                        if now - timedelta(minutes=minutes_after) <= event_dt.to_pydatetime() <= now + timedelta(minutes=minutes_before):
-                            blackout = True
-                            break
-                    if blackout:
+                    if now - timedelta(minutes=minutes_after) <= event_dt.to_pydatetime() <= now + timedelta(minutes=minutes_before):
+                        blackout = True
                         break
+                if blackout:
+                    break
             except Exception:
-                logger.warning("News blackout URL failed: %s; trying next source", url)
+                if logfire is not None and hasattr(logfire, "warn"):
+                    logfire.warn(f"News blackout URL failed: {url}")
+                else:
+                    logger.warning("News blackout URL failed: %s", url)
                 continue
 
         if not blackout:

@@ -211,6 +211,40 @@ async def main() -> None:
     try:
         mt5_client.connect()
 
+        # Startup verification
+        logfire.info("Running startup checks...")
+
+        # 1. Check MT5 connection
+        try:
+            account = mt5_client.get_account_info()
+            logfire.info(f"MT5 connected: equity=${account.equity:,.2f}")
+        except Exception as e:
+            logfire.error(f"MT5 connection failed: {e}")
+            account = None
+
+        # 2. Check Redis
+        try:
+            if account is not None:
+                state_store.save_peak_equity(account.equity)
+            else:
+                state_store.save_peak_equity(0.0)
+            logfire.info("Redis connected OK")
+        except Exception as e:
+            logfire.error(f"Redis failed: {e}")
+
+        # 3. Check news blackout
+        try:
+            blackout = is_news_blackout()
+            logfire.info(f"News blackout check: {blackout}")
+        except Exception as e:
+            logfire.error(f"News blackout check failed: {e}")
+
+        # 4. Run one immediate trading cycle
+        logfire.info("Running immediate trading cycle...")
+        await execute_trading_cycle(mt5_client, risk_manager, state_store, asian_breakout, barbell)
+
+        logfire.info("Startup checks complete - scheduler starting")
+
         scheduler = build_scheduler(mt5_client, risk_manager, state_store, asian_breakout, barbell, sentiment_agent)
         scheduler.start()
         logger.info("Scheduler started")
