@@ -55,6 +55,11 @@ async def execute_trading_cycle(
             logger.warning("Emergency stop is active; skipping trading cycle")
             return
 
+        # Check for leverage drift and actively reduce positions if needed
+        reduction_results = risk_manager.reduce_positions_if_leverage_high()
+        if reduction_results:
+            logger.info("Closed %d positions due to leverage drift", sum(1 for r in reduction_results if r.success))
+
         safe, reason = risk_manager.is_safe_to_trade()
         if not safe:
             logger.warning("Trading is not safe: %s", reason)
@@ -83,6 +88,10 @@ async def execute_trading_cycle(
                 notional = float(signal.volume) * float(signal.entry_price)
                 if not risk_manager.check_concentration(signal.symbol, notional):
                     logger.warning("Concentration check failed for %s", signal.symbol)
+                    continue
+
+                if not risk_manager.check_directional_exposure(signal):
+                    logger.warning("Directional exposure check failed for %s", signal.symbol)
                     continue
 
                 result = client.place_market_order(signal)

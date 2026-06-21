@@ -161,8 +161,6 @@ class RiskManager:
                     )
                 if state.current_drawdown_pct > 15.0:
                     return False, f"Drawdown {state.current_drawdown_pct:.1f}% exceeds 15%"
-                if self._single_instrument_concentration(state) > 0.85:
-                    return False, "Single instrument concentration exceeds 85%"
 
                 return True, "OK"
             except Exception as exc:
@@ -207,3 +205,109 @@ class RiskManager:
             except Exception as exc:
                 logger.exception("Concentration check failed for %s", new_symbol)
                 return True
+
+    def calculate_net_directional_exposure(self) -> float:
+        """Return net directional exposure as percentage (0-100 = balanced to fully long/short)."""
+        with _span("RiskManager.calculate_net_directional_exposure"):
+            try:
+                state = self.check_risk_state()
+                long_notional = sum(
+                    p.volume * p.current_price
+                    for p in state.active_positions
+                    if p.volume > 0
+                )
+                short_notional = sum(
+                    abs(p.volume) * p.current_price
+                    for p in state.active_positions
+                    if p.volume < 0
+                )
+                total = long_notional + short_notional
+                if total <= 0:
+                    return 0.0
+                net = abs(long_notional - short_notional)
+                return (net / total) * 100.0
+            except Exception as exc:
+                logger.exception("Failed to calculate net directional exposure")
+                return 0.0
+
+    def check_directional_exposure(self, signal) -> bool:
+        """Return True if adding signal keeps net directional exposure below 95%."""
+        with _span("RiskManager.check_directional_exposure"):
+            try:
+                state = self.check_risk_state()
+                signal_notional = float(signal.volume) * float(signal.entry_price)
+
+                long_notional = sum(
+                    p.volume * p.current_price
+                    for p in state.active_positions
+                    if p.volume > 0
+                )
+                short_notional = sum(
+                    abs(p.volume) * p.current_price
+                    for p in state.active_positions
+                    if p.volume < 0
+                )
+
+                # Add signal to appropriate side
+                if signal.action.upper() == "BUY":
+                    long_notional += signal_notional
+                else:
+                    short_notional += signal_notional
+
+                total = long_notional + short_notional
+                if total <= 0:
+                    return True
+
+                net = abs(long_notional - short_notional)
+                directional_exposure = (net / total) * 100.0
+
+                if directional_exposure > 95.0:
+                    logger.warning(
+                        "Directional exposure would exceed 95%%: %.1f%% (signal: %s %s)",
+                        directional_exposure,
+                        signal.action,
+                        signal.symbol,
+                    )
+                    return False
+                return True
+            except Exception as exc:
+                logger.exception("Directional exposure check failed")
+                return True  # fail open to allow trading
+
+    def reduce_positions_if_leverage_high(self) -> List[OrderResult]:
+        """If leverage > 27.5x, close smallest/oldest positions until leverage <= 27.5x."""
+        with _span("RiskManager.reduce_positions_if_leverage_high"):
+            results = []
+            try:
+                state = self.check_risk_state()
+                if state.leverage_ratio <= 27.5:
+                    return results
+
+                logger.warning(
+                    "Leverage drift detected: %.1fx; reducing positions",
+                    state.leverage_ratio,
+                )
+
+                # Sort by notional value (smallest first)
+                sorted_positions = sorted(
+                    state.active_positions,
+                    key=lambda p: abs(p.volume * p.current_price),
+                )
+
+                for position in sorted_positions:
+                    result = self.client.close_position(position.ticket)
+                    results.append(result)
+
+                    # Check if we're back below 27.5x
+                    state = self.check_risk_state()
+                    if state.leverage_ratio <= 27.5:
+                        logger.info(
+                            "Leverage reduced to %.1fx; position reduction complete",
+                            state.leverage_ratio,
+                        )
+                        break
+
+                return results
+            except Exception as exc:
+                logger.exception("Failed to reduce positions for leverage")
+                return results
