@@ -193,10 +193,24 @@ class RiskManager:
                 return []
 
     def check_concentration(self, new_symbol: str, new_notional: float) -> bool:
-        """Return True if adding a proposed position keeps concentration below 85%."""
+        """Return True if adding a proposed position keeps concentration below 85%.
+        
+        Safety rule: Only enforce concentration limits at high leverage (>15x).
+        At low leverage, concentration checks pass automatically to allow strategies to scale up.
+        """
         with _span("RiskManager.check_concentration"):
             try:
                 state = self.check_risk_state()
+                
+                # At low leverage (<=15x), allow all concentrations. Rules restrict "near-full-leverage" scenarios.
+                if state.leverage_ratio <= 15.0:
+                    logger.debug(
+                        "Leverage %.1fx is below 15x threshold; concentration check bypassed for %s",
+                        state.leverage_ratio,
+                        new_symbol,
+                    )
+                    return True
+                
                 current_gross = sum(
                     abs(p.volume * p.current_price)
                     for p in state.active_positions
@@ -215,7 +229,15 @@ class RiskManager:
                 new_gross = current_gross + new_notional
                 concentration = symbol_notional / new_gross
 
-                return concentration <= 0.85
+                if concentration > 0.85:
+                    logger.warning(
+                        "Concentration check blocked at %.1fx leverage: %s would be %.1f%% (threshold 85%%)",
+                        state.leverage_ratio,
+                        new_symbol,
+                        concentration * 100.0,
+                    )
+                    return False
+                return True
             except Exception as exc:
                 logger.exception("Concentration check failed for %s", new_symbol)
                 return True
@@ -245,10 +267,26 @@ class RiskManager:
                 return 0.0
 
     def check_directional_exposure(self, signal) -> bool:
-        """Return True if adding signal keeps net directional exposure below 95%."""
+        """Return True if adding signal keeps net directional exposure below 95%.
+        
+        Safety rule: Only enforce directional limits at high leverage (>15x).
+        At low leverage, directional checks pass automatically to allow strategies to scale up.
+        Rules restrict "near-full-leverage" directional scenarios, not modest directional positions.
+        """
         with _span("RiskManager.check_directional_exposure"):
             try:
                 state = self.check_risk_state()
+                
+                # At low leverage (<=15x), allow all directional exposures. Rules restrict "near-full-leverage" scenarios.
+                if state.leverage_ratio <= 15.0:
+                    logger.debug(
+                        "Leverage %.1fx is below 15x threshold; directional check bypassed for %s %s",
+                        state.leverage_ratio,
+                        signal.action,
+                        signal.symbol,
+                    )
+                    return True
+                
                 signal_notional = float(signal.volume) * float(signal.entry_price)
 
                 # Current portfolio directional exposure (existing positions only)
@@ -267,8 +305,13 @@ class RiskManager:
                 if current_total > 0:
                     current_directional = abs(current_long - current_short) / current_total * 100.0
 
-                # If already concentrated, allow signal through (we can't fix historic concentration)
+                # If already concentrated at high leverage, allow signal through (we can't fix historic concentration)
                 if current_directional >= 95.0:
+                    logger.debug(
+                        "Portfolio already at %.1f%% directional at %.1fx leverage; allowing signal through",
+                        current_directional,
+                        state.leverage_ratio,
+                    )
                     return True
 
                 # Otherwise, simulate adding the signal and block only if it would push over 95%
@@ -286,7 +329,8 @@ class RiskManager:
                 new_directional = abs(new_long - new_short) / new_total * 100.0
                 if new_directional > 95.0:
                     logger.warning(
-                        "Directional exposure would exceed 95%% after adding signal: %.1f%% (signal: %s %s)",
+                        "Directional exposure would exceed 95%% at %.1fx leverage after adding signal: %.1f%% (signal: %s %s)",
+                        state.leverage_ratio,
                         new_directional,
                         signal.action,
                         signal.symbol,
