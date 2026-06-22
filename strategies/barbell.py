@@ -239,6 +239,27 @@ class BarbellStrategy:
                         logger.warning("ATR calculation failed for %s, using fallback volatility", symbol)
                         atr = float(entry_price) * 0.01
 
+                    # SHORT-TERM MOMENTUM CHECK: Verify price is actually moving our direction
+                    try:
+                        m5_candles = client.get_candles(symbol, mt5.TIMEFRAME_M5, 10)
+                        if len(m5_candles) >= 3:
+                            recent_close = float(m5_candles["close"].iloc[-1])
+                            prev_close = float(m5_candles["close"].iloc[-3])  # 15 mins ago
+                            short_momentum = (recent_close - prev_close) / prev_close if prev_close != 0 else 0
+                            
+                            # STRICT: Only BUY if price went UP, only SELL if price went DOWN
+                            if action == "BUY" and short_momentum < 0.0001:  # Not going up
+                                logger.info("Skipping BUY %s - short-term momentum negative (%.4f%%)", 
+                                           symbol, short_momentum * 100)
+                                continue
+                            if action == "SELL" and short_momentum > -0.0001:  # Not going down
+                                logger.info("Skipping SELL %s - short-term momentum positive (%.4f%%)", 
+                                           symbol, short_momentum * 100)
+                                continue
+                    except Exception as e:
+                        logger.warning("Short-term momentum check failed for %s: %s", symbol, e)
+                        continue  # Skip if we can't verify momentum
+                    
                     # Conservative stops: 0.8x ATR, tighter profits: 0.7x ATR (exit faster for better capture rate)
                     if action == "BUY":
                         stop_loss = float(entry_price - atr * 0.8)
@@ -246,6 +267,14 @@ class BarbellStrategy:
                     else:
                         stop_loss = float(entry_price + atr * 0.8)
                         take_profit = float(entry_price - atr * 0.7)
+                    
+                    # SANITY CHECK: TP must be profitable
+                    if action == "BUY" and take_profit <= entry_price:
+                        logger.error("BUG: BUY TP %.5f <= entry %.5f for %s, skipping", take_profit, entry_price, symbol)
+                        continue
+                    if action == "SELL" and take_profit >= entry_price:
+                        logger.error("BUG: SELL TP %.5f >= entry %.5f for %s, skipping", take_profit, entry_price, symbol)
+                        continue
 
                     # Spread filter: skip if spread > 30% of TP distance (kills profitability at high frequency)
                     tp_distance = abs(take_profit - entry_price)

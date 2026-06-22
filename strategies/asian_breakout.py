@@ -159,10 +159,25 @@ class AsianBreakoutStrategy:
                             logger.info("Skipping bullish breakout on %s - against DOWN trend (strength=%.2f)", symbol, trend_strength)
                             continue
                         
+                        # SHORT-TERM MOMENTUM: Only BUY if price is actually moving UP (last 3 M5 bars)
+                        if len(candles) >= 3:
+                            recent_close = float(candles["close"].iloc[-1])
+                            prev_close = float(candles["close"].iloc[-3])
+                            short_momentum = (recent_close - prev_close) / prev_close if prev_close != 0 else 0
+                            if short_momentum < 0.0001:
+                                logger.info("Skipping BUY %s - short-term momentum negative (%.4f%%)", 
+                                           symbol, short_momentum * 100)
+                                continue
+                        
                         entry = current_close
                         atr_value = calculate_atr(candles, self.atr_period)
                         stop_loss = current_low - atr_value * 0.3
                         take_profit = entry + range_width * 0.6
+                        
+                        # SANITY CHECK: TP must be above entry for BUY
+                        if take_profit <= entry:
+                            logger.error("BUG: BUY TP %.5f <= entry %.5f for %s, skipping", take_profit, entry, symbol)
+                            continue
                         
                         # Spread filter: skip if spread > 30% of TP distance
                         tp_distance = abs(take_profit - entry)
@@ -221,10 +236,25 @@ class AsianBreakoutStrategy:
                             logger.info("Skipping bearish breakout on %s - against UP trend (strength=%.2f)", symbol, trend_strength)
                             continue
                         
+                        # SHORT-TERM MOMENTUM: Only SELL if price is actually moving DOWN (last 3 M5 bars)
+                        if len(candles) >= 3:
+                            recent_close = float(candles["close"].iloc[-1])
+                            prev_close = float(candles["close"].iloc[-3])
+                            short_momentum = (recent_close - prev_close) / prev_close if prev_close != 0 else 0
+                            if short_momentum > -0.0001:
+                                logger.info("Skipping SELL %s - short-term momentum positive (%.4f%%)", 
+                                           symbol, short_momentum * 100)
+                                continue
+                        
                         entry = current_close
                         atr_value = calculate_atr(candles, self.atr_period)
                         stop_loss = current_high + atr_value * 0.3
                         take_profit = entry - range_width * 0.6
+                        
+                        # SANITY CHECK: TP must be below entry for SELL
+                        if take_profit >= entry:
+                            logger.error("BUG: SELL TP %.5f >= entry %.5f for %s, skipping", take_profit, entry, symbol)
+                            continue
                         
                         # Spread filter: skip if spread > 30% of TP distance
                         tp_distance = abs(take_profit - entry)
