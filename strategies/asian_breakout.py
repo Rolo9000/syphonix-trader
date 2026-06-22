@@ -145,7 +145,7 @@ class AsianBreakoutStrategy:
                         entry = current_close
                         atr_value = calculate_atr(candles, self.atr_period)
                         stop_loss = current_low - atr_value * 0.3
-                        take_profit = entry + range_width * 0.8
+                        take_profit = entry + range_width * 0.6
                         stop_loss_pips = self._price_diff_to_pips(symbol, abs(entry - stop_loss))
                         
                         # Scale volume by trend confirmation (0.5x if neutral, 1.5x if trend confirms)
@@ -183,7 +183,7 @@ class AsianBreakoutStrategy:
                         entry = current_close
                         atr_value = calculate_atr(candles, self.atr_period)
                         stop_loss = current_high + atr_value * 0.3
-                        take_profit = entry - range_width * 0.8
+                        take_profit = entry - range_width * 0.6
                         stop_loss_pips = self._price_diff_to_pips(symbol, abs(entry - stop_loss))
                         
                         # Scale volume by trend confirmation

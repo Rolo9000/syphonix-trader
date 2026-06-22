@@ -186,7 +186,7 @@ def build_scheduler(
     scheduler.add_job(
         lambda: loop.call_soon_threadsafe(asyncio.create_task, execute_trading_cycle(client, risk_manager, state_store, asian_breakout, barbell)),
         "interval",
-        minutes=5,
+        minutes=2,
         id="execute_trading_cycle",
         replace_existing=True,
     )

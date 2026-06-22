@@ -59,7 +59,7 @@ class BarbellStrategy:
         "SOLUSD": 0.10,
         "XRPUSD": 0.10,
     }
-    total_allocation_pct: float = 0.25  # Increased from 0.15 (67% more capital)
+    total_allocation_pct: float = 0.35  # Increased from 0.25 (40% more capital)
 
     def __init__(
         self,
@@ -219,13 +219,13 @@ class BarbellStrategy:
                         logger.warning("ATR calculation failed for %s, using fallback volatility", symbol)
                         atr = float(entry_price) * 0.01
 
-                    # Conservative stops: 0.8x ATR, tight profits: 1.0x ATR
+                    # Conservative stops: 0.8x ATR, tighter profits: 0.7x ATR (exit faster for better capture rate)
                     if action == "BUY":
                         stop_loss = float(entry_price - atr * 0.8)
-                        take_profit = float(entry_price + atr * 1.0)
+                        take_profit = float(entry_price + atr * 0.7)
                     else:
                         stop_loss = float(entry_price + atr * 0.8)
-                        take_profit = float(entry_price - atr * 1.0)
+                        take_profit = float(entry_price - atr * 0.7)
 
                     stop_loss_pips = float(abs(entry_price - stop_loss) * (100.0 if symbol.endswith("JPY") else 10000.0))
                     base_volume = float(risk_manager.calculate_position_size(symbol, stop_loss_pips, risk_manager.risk_per_trade))
