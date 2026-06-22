@@ -59,7 +59,7 @@ class BarbellStrategy:
         "SOLUSD": 0.10,
         "XRPUSD": 0.10,
     }
-    total_allocation_pct: float = 0.15
+    total_allocation_pct: float = 0.25  # Increased from 0.15 (67% more capital)
 
     def __init__(
         self,

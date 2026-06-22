@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 from contextlib import nullcontext
+from datetime import datetime
 from typing import List
 
 try:
@@ -24,7 +25,7 @@ except ImportError:  # pragma: no cover
     mt5 = None
     MT5_AVAILABLE = False
 
-from core.models import OrderResult, Position, RiskState
+from core.models import OrderResult, Position, RiskState, TradeSignal
 from core.mt5_client import MT5Client
 
 logger = logging.getLogger(__name__)
@@ -42,7 +43,7 @@ class RiskManager:
     def __init__(
         self,
         client: MT5Client,
-        risk_per_trade: float = 0.005,
+        risk_per_trade: float = 0.010,
         max_daily_drawdown: float = 0.05,
         max_open_positions: int = 5,
     ) -> None:
@@ -234,12 +235,20 @@ class RiskManager:
                             hedge_volume,
                         )
                         
-                        hedge_result = client.place_order(
+                        # Create a minimal TradeSignal for hedge placement
+                        hedge_signal = TradeSignal(
                             symbol=position.symbol,
                             action=hedge_action,
+                            entry_price=position.current_price,
+                            stop_loss=position.stop_loss,  # Use position's existing stop
+                            take_profit=position.take_profit,  # Use position's existing TP
                             volume=hedge_volume,
-                            order_type="MARKET",
+                            strategy_name="Hedging",
+                            confidence=0.5,
+                            timestamp=datetime.utcnow(),
                         )
+                        hedge_result = client.place_market_order(hedge_signal)
+                        logger.debug("Hedge result for %s: success=%s", position.symbol, hedge_result.success)
                         results.append(hedge_result)
                     except Exception as exc:
                         logger.exception("Failed to place hedge for %s", position.symbol)
