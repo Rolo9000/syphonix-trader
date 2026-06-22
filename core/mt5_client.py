@@ -116,11 +116,30 @@ class MT5Client:
             balance = float(account_info.balance)
             margin_used = float(getattr(account_info, "margin", 0.0))
             margin_free = float(getattr(account_info, "margin_free", 0.0))
-            leverage_ratio = float(getattr(account_info, "leverage", 0.0))
             peak_equity = float(getattr(account_info, "equity", equity))
+            current_drawdown_pct = float(getattr(account_info, "drawdown", 0.0))
+
+            # Calculate actual leverage from open positions
+            positions = mt5.positions_get()
+            gross_notional = 0.0
+            if positions:
+                for pos in positions:
+                    try:
+                        tick = mt5.symbol_info_tick(pos.symbol)
+                        if tick is None:
+                            continue
+                        symbol_info = mt5.symbol_info(pos.symbol)
+                        if symbol_info is None:
+                            continue
+                        price = tick.bid if pos.type == 0 else tick.ask
+                        contract_size = float(symbol_info.trade_contract_size)
+                        gross_notional += abs(pos.volume * price * contract_size)
+                    except Exception:
+                        continue
+            
+            actual_leverage = gross_notional / equity if equity > 0 else 0.0
 
             margin_usage_pct = (margin_used / equity * 100.0) if equity else 0.0
-            current_drawdown_pct = float(getattr(account_info, "drawdown", 0.0))
 
             return RiskState(
                 equity=equity,
@@ -130,7 +149,7 @@ class MT5Client:
                 margin_usage_pct=margin_usage_pct,
                 current_drawdown_pct=current_drawdown_pct,
                 peak_equity=peak_equity,
-                leverage_ratio=leverage_ratio,
+                leverage_ratio=actual_leverage,
                 active_positions=self.get_open_positions(),
             )
         except Exception as exc:

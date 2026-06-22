@@ -56,7 +56,7 @@ class AsianBreakoutStrategy:
         "EURCHF",
     ]
     min_range_pips: float = 20.0
-    risk_per_trade: float = 0.008
+    risk_per_trade: float = 0.05
     atr_period: int = 14
     atr_stop_mult: float = 1.5
 

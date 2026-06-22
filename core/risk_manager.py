@@ -17,6 +17,13 @@ try:
 except ImportError:  # pragma: no cover
     logfire = None
 
+try:
+    import MetaTrader5 as mt5
+    MT5_AVAILABLE = True
+except ImportError:  # pragma: no cover
+    mt5 = None
+    MT5_AVAILABLE = False
+
 from core.models import OrderResult, Position, RiskState
 from core.mt5_client import MT5Client
 
@@ -35,7 +42,7 @@ class RiskManager:
     def __init__(
         self,
         client: MT5Client,
-        risk_per_trade: float = 0.02,
+        risk_per_trade: float = 0.05,
         max_daily_drawdown: float = 0.05,
         max_open_positions: int = 5,
     ) -> None:
@@ -57,9 +64,9 @@ class RiskManager:
         self,
         symbol: str,
         stop_loss_pips: float,
-        risk_pct: float = 0.01,
+        risk_pct: float = 0.05,
     ) -> float:
-        """Return the lot size that risks no more than ``risk_pct`` of equity, while keeping leverage ≤ 27x."""
+        """Return the lot size that risks up to risk_pct of equity, capping leverage at 20x."""
         with _span("RiskManager.calculate_position_size"):
             try:
                 state = self.client.get_account_info()
@@ -67,50 +74,56 @@ class RiskManager:
                 if equity <= 0 or stop_loss_pips <= 0:
                     raise ValueError("Equity and stop loss pips must be positive")
 
+                # Risk amount in dollars
                 risk_amount = equity * risk_pct
-                pip_value = self._pip_value(symbol)
-                base_volume = risk_amount / (stop_loss_pips * pip_value)
 
-                # Check current leverage and cap position to keep total leverage ≤ 27x
-                risk_state = self.check_risk_state()
-                current_notional = sum(
-                    abs(p.volume * p.current_price) for p in risk_state.active_positions
-                )
+                # Get symbol info for pip value calculation
+                if not MT5_AVAILABLE:
+                    raise RuntimeError("MetaTrader5 not available")
+                
+                symbol_info = mt5.symbol_info(symbol)
+                if symbol_info is None:
+                    return symbol_info.volume_min if symbol_info else 0.01
 
-                max_leverage = 27.0
-                max_allowed_notional = max_leverage * equity
-                available_notional = max_allowed_notional - current_notional
+                # Calculate pip value per lot
+                contract_size = float(symbol_info.trade_contract_size)
 
-                if available_notional <= 0:
-                    logger.warning(
-                        "Leverage cap reached: current_notional=%.0f, max_allowed=%.0f",
-                        current_notional,
-                        max_allowed_notional,
-                    )
-                    return 0.0
+                if symbol.endswith('JPY'):
+                    pip_value_per_lot = contract_size * 0.01
+                elif symbol in ['XAUUSD', 'XAGUSD']:
+                    pip_value_per_lot = contract_size * 0.01
+                elif symbol in ['BTCUSD', 'ETHUSD', 'SOLUSD', 'XRPUSD', 'BARUSD']:
+                    pip_value_per_lot = contract_size * 0.01
+                else:
+                    pip_value_per_lot = contract_size * 0.0001
 
-                # Get current price to calculate notional value of this position
-                try:
-                    current_price = self.client.get_current_price(symbol)[0]
-                except Exception:
-                    current_price = 1.0  # fallback
+                if stop_loss_pips <= 0 or pip_value_per_lot <= 0:
+                    return symbol_info.volume_min
 
-                position_notional = base_volume * current_price
-                if position_notional > available_notional:
-                    # Scale down volume to fit within leverage cap
-                    capped_volume = available_notional / current_price
-                    logger.info(
-                        "Position size capped by leverage: %.4f → %.4f for %s",
-                        base_volume,
-                        capped_volume,
-                        symbol,
-                    )
-                    return max(capped_volume, 0.0)
+                # Base volume from risk
+                volume = risk_amount / (stop_loss_pips * pip_value_per_lot)
 
-                return max(base_volume, 0.0)
+                # Apply leverage cap - don't exceed 20x total leverage
+                current_notional = state.leverage_ratio * equity
+                tick = mt5.symbol_info_tick(symbol)
+                if tick:
+                    price = (float(tick.bid) + float(tick.ask)) / 2.0
+                    new_notional = volume * price * contract_size
+                    if (current_notional + new_notional) / equity > 20.0:
+                        max_new_notional = (20.0 * equity) - current_notional
+                        if max_new_notional <= 0:
+                            return 0.0
+                        volume = max_new_notional / (price * contract_size)
+
+                # Normalize to lot step
+                volume_step = float(symbol_info.volume_step)
+                volume = round(round(volume / volume_step) * volume_step, 8)
+                volume = max(float(symbol_info.volume_min), min(float(symbol_info.volume_max), volume))
+
+                return volume
             except Exception as exc:
-                logger.exception("Failed to calculate position size for %s", symbol)
-                return 0.0
+                logger.exception("Position size calculation failed for %s", symbol)
+                return 0.01
 
     def check_risk_state(self) -> RiskState:
         """Fetch the latest broker state and normalize derived risk metrics."""
@@ -275,16 +288,16 @@ class RiskManager:
                 return True  # fail open to allow trading
 
     def reduce_positions_if_leverage_high(self) -> List[OrderResult]:
-        """If leverage > 27.5x, close smallest/oldest positions until leverage <= 27.5x."""
+        """If leverage > 20.5x, close smallest/oldest positions until leverage <= 20.5x."""
         with _span("RiskManager.reduce_positions_if_leverage_high"):
             results = []
             try:
                 state = self.check_risk_state()
-                if state.leverage_ratio <= 27.5:
+                if state.leverage_ratio <= 20.5:
                     return results
 
                 logger.warning(
-                    "Leverage drift detected: %.1fx; reducing positions",
+                    "Leverage drift detected: %.1fx; reducing positions to stay below 20.5x",
                     state.leverage_ratio,
                 )
 
@@ -298,9 +311,9 @@ class RiskManager:
                     result = self.client.close_position(position.ticket)
                     results.append(result)
 
-                    # Check if we're back below 27.5x
+                    # Check if we're back below 20.5x
                     state = self.check_risk_state()
-                    if state.leverage_ratio <= 27.5:
+                    if state.leverage_ratio <= 20.5:
                         logger.info(
                             "Leverage reduced to %.1fx; position reduction complete",
                             state.leverage_ratio,
