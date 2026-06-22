@@ -159,16 +159,6 @@ class AsianBreakoutStrategy:
                             logger.info("Skipping bullish breakout on %s - against DOWN trend (strength=%.2f)", symbol, trend_strength)
                             continue
                         
-                        # SHORT-TERM MOMENTUM: Only BUY if price is actually moving UP (last 3 M5 bars)
-                        if len(candles) >= 3:
-                            recent_close = float(candles["close"].iloc[-1])
-                            prev_close = float(candles["close"].iloc[-3])
-                            short_momentum = (recent_close - prev_close) / prev_close if prev_close != 0 else 0
-                            if short_momentum < 0.0001:
-                                logger.info("Skipping BUY %s - short-term momentum negative (%.4f%%)", 
-                                           symbol, short_momentum * 100)
-                                continue
-                        
                         entry = current_close
                         atr_value = calculate_atr(candles, self.atr_period)
                         stop_loss = current_low - atr_value * 0.3
@@ -235,16 +225,6 @@ class AsianBreakoutStrategy:
                         if trend_direction == "UP" and trend_strength >= 0.3:
                             logger.info("Skipping bearish breakout on %s - against UP trend (strength=%.2f)", symbol, trend_strength)
                             continue
-                        
-                        # SHORT-TERM MOMENTUM: Only SELL if price is actually moving DOWN (last 3 M5 bars)
-                        if len(candles) >= 3:
-                            recent_close = float(candles["close"].iloc[-1])
-                            prev_close = float(candles["close"].iloc[-3])
-                            short_momentum = (recent_close - prev_close) / prev_close if prev_close != 0 else 0
-                            if short_momentum > -0.0001:
-                                logger.info("Skipping SELL %s - short-term momentum positive (%.4f%%)", 
-                                           symbol, short_momentum * 100)
-                                continue
                         
                         entry = current_close
                         atr_value = calculate_atr(candles, self.atr_period)
