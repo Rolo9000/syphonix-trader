@@ -20,7 +20,7 @@ except ImportError:  # pragma: no cover - platform dependent
     MT5_AVAILABLE = False
 import pandas as pd
 
-from core.indicators import calculate_atr, calculate_portfolio_weights, calculate_trend_strength
+from core.indicators import calculate_atr, calculate_portfolio_weights, calculate_trend_strength, is_rapid_decline, is_rapid_rally
 from core.models import TradeSignal
 from core.mt5_client import MT5Client
 from core.risk_manager import RiskManager
@@ -162,22 +162,31 @@ class BarbellStrategy:
                     existing_positions[pos.symbol] = direction
 
             # Step 1: Calculate trend strength for all symbols and compute dynamic weights
+            # Using M15 for faster trend response (was H1 which lagged badly)
             trend_data = {}
             total_trend_score = 0.0
             for symbol in self.symbols:
                 try:
-                    candles = client.get_candles(symbol, mt5.TIMEFRAME_H1, 30)
+                    candles = client.get_candles(symbol, mt5.TIMEFRAME_M15, 30)
                     direction, strength = calculate_trend_strength(candles)
-                    trend_data[symbol] = {"direction": direction, "strength": strength}
+                    # Check for rapid price movement
+                    declining = is_rapid_decline(candles, threshold=0.003, bars=4)
+                    rallying = is_rapid_rally(candles, threshold=0.003, bars=4)
+                    trend_data[symbol] = {
+                        "direction": direction, 
+                        "strength": strength,
+                        "declining": declining,
+                        "rallying": rallying
+                    }
                     # Trending assets get boosted weight (1.0 to 2.5x)
-                    if strength > 0.3:  # Only boost if trend is meaningful
+                    if strength > 0.5:  # Stricter threshold (was 0.3)
                         trend_score = 1.0 + (strength * 1.5)  # Max 2.5x at full strength
                     else:
                         trend_score = 1.0
                     trend_data[symbol]["score"] = trend_score
                     total_trend_score += trend_score * float(self.target_weights.get(symbol, 0.0))
                 except Exception:
-                    trend_data[symbol] = {"direction": "NEUTRAL", "strength": 0.0, "score": 1.0}
+                    trend_data[symbol] = {"direction": "NEUTRAL", "strength": 0.0, "score": 1.0, "declining": False, "rallying": False}
                     total_trend_score += float(self.target_weights.get(symbol, 0.0))
 
             # Step 2: Compute trend-adjusted allocation per symbol
@@ -219,8 +228,16 @@ class BarbellStrategy:
                         logger.debug("Skipping %s %s - already have %s position", raw_action, symbol, raw_action)
                         continue
                     
-                    # Skip trades against trends (lowered threshold from 0.5 to 0.3 to avoid counter-trend losses)
-                    if trend_strength >= 0.3:
+                    # RAPID MOVEMENT FILTER: Don't buy into falling knife, don't sell into rally
+                    if raw_action == "BUY" and trend_data[symbol].get("declining", False):
+                        logger.info("Skipping BUY %s - rapid decline detected (price dropping fast)", symbol)
+                        continue
+                    if raw_action == "SELL" and trend_data[symbol].get("rallying", False):
+                        logger.info("Skipping SELL %s - rapid rally detected (price rising fast)", symbol)
+                        continue
+                    
+                    # Skip trades against trends (stricter threshold: 0.5 instead of 0.3)
+                    if trend_strength >= 0.5:
                         if (trend_direction == "UP" and raw_action == "SELL") or \
                            (trend_direction == "DOWN" and raw_action == "BUY"):
                             logger.info("Skipping %s %s - against trend (%s, strength=%.2f)",
@@ -231,7 +248,7 @@ class BarbellStrategy:
                     entry_price = float(current_price)
                     
                     try:
-                        candles = client.get_candles(symbol, mt5.TIMEFRAME_H1, 20)
+                        candles = client.get_candles(symbol, mt5.TIMEFRAME_M15, 30)
                         atr = calculate_atr(candles)
                         if atr is None or atr <= 0.0:
                             raise ValueError("ATR calculation returned invalid value")

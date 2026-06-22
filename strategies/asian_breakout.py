@@ -24,6 +24,8 @@ from core.indicators import (
     calculate_atr,
     detect_market_structure_shift,
     calculate_trend_strength,
+    is_rapid_decline,
+    is_rapid_rally,
 )
 from core.models import TradeSignal
 from core.mt5_client import MT5Client
@@ -129,12 +131,16 @@ class AsianBreakoutStrategy:
                         logger.debug("No M5 candles for %s", symbol)
                         continue
 
-                    # Get H1 candles for trend detection
+                    # Get M15 candles for trend detection (faster than H1)
                     try:
-                        h1_candles = client.get_candles(symbol, mt5.TIMEFRAME_H1, 30)
-                        trend_direction, trend_strength = calculate_trend_strength(h1_candles)
+                        m15_candles = client.get_candles(symbol, mt5.TIMEFRAME_M15, 30)
+                        trend_direction, trend_strength = calculate_trend_strength(m15_candles)
+                        # Check rapid price movement
+                        declining = is_rapid_decline(m15_candles, threshold=0.003, bars=4)
+                        rallying = is_rapid_rally(m15_candles, threshold=0.003, bars=4)
                     except Exception:
                         trend_direction, trend_strength = "NEUTRAL", 0.0
+                        declining, rallying = False, False
 
                     latest = candles.iloc[-1]
                     current_low = float(latest["low"])
@@ -155,8 +161,12 @@ class AsianBreakoutStrategy:
                     
                     # Only take bullish breakout if trend is UP or NEUTRAL (not against DOWN trend)
                     if bullish_sweep and market_structure == "BULLISH_MSS":
-                        if trend_direction == "DOWN" and trend_strength >= 0.3:
+                        if trend_direction == "DOWN" and trend_strength >= 0.5:
                             logger.info("Skipping bullish breakout on %s - against DOWN trend (strength=%.2f)", symbol, trend_strength)
+                            continue
+                        # Don't buy into falling knife
+                        if declining:
+                            logger.info("Skipping bullish breakout on %s - rapid decline detected", symbol)
                             continue
                         
                         entry = current_close
@@ -222,8 +232,12 @@ class AsianBreakoutStrategy:
                         )
                     # Only take bearish breakout if trend is DOWN or NEUTRAL (not against UP trend)
                     elif bearish_sweep and market_structure == "BEARISH_MSS":
-                        if trend_direction == "UP" and trend_strength >= 0.3:
+                        if trend_direction == "UP" and trend_strength >= 0.5:
                             logger.info("Skipping bearish breakout on %s - against UP trend (strength=%.2f)", symbol, trend_strength)
+                            continue
+                        # Don't sell into rallying market
+                        if rallying:
+                            logger.info("Skipping bearish breakout on %s - rapid rally detected", symbol)
                             continue
                         
                         entry = current_close

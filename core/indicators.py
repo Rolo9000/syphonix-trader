@@ -64,7 +64,53 @@ def calculate_atr(df: pd.DataFrame, period: int = 14) -> float:
         return atr_value
 
 
-def calculate_trend_strength(df: pd.DataFrame, fast_period: int = 8, slow_period: int = 21) -> tuple[str, float]:
+def is_rapid_decline(df: pd.DataFrame, threshold: float = 0.003, bars: int = 4) -> bool:
+    """Check if price dropped rapidly in the last N bars.
+    
+    Args:
+        df: DataFrame with 'close' column
+        threshold: Minimum decline percentage (0.003 = 0.3%)
+        bars: Number of recent bars to check
+    
+    Returns:
+        True if price dropped more than threshold in last N bars
+    """
+    try:
+        if len(df) < bars + 1:
+            return False
+        close = df["close"].astype(float)
+        current = float(close.iloc[-1])
+        past = float(close.iloc[-bars-1])
+        pct_change = (current - past) / past if past != 0 else 0.0
+        return pct_change < -threshold
+    except Exception:
+        return False
+
+
+def is_rapid_rally(df: pd.DataFrame, threshold: float = 0.003, bars: int = 4) -> bool:
+    """Check if price rallied rapidly in the last N bars.
+    
+    Args:
+        df: DataFrame with 'close' column
+        threshold: Minimum rally percentage (0.003 = 0.3%)
+        bars: Number of recent bars to check
+    
+    Returns:
+        True if price rose more than threshold in last N bars
+    """
+    try:
+        if len(df) < bars + 1:
+            return False
+        close = df["close"].astype(float)
+        current = float(close.iloc[-1])
+        past = float(close.iloc[-bars-1])
+        pct_change = (current - past) / past if past != 0 else 0.0
+        return pct_change > threshold
+    except Exception:
+        return False
+
+
+def calculate_trend_strength(df: pd.DataFrame, fast_period: int = 5, slow_period: int = 13) -> tuple[str, float]:
     """Calculate trend direction and strength using EMA crossover and momentum.
     
     Returns:
@@ -73,7 +119,7 @@ def calculate_trend_strength(df: pd.DataFrame, fast_period: int = 8, slow_period
             - strength: 0.0 to 1.0 (0 = no trend, 1 = strong trend)
     
     Strategy:
-        - EMA crossover determines direction
+        - EMA crossover determines direction (faster 5/13 periods)
         - Distance between EMAs relative to ATR determines strength
         - Recent price momentum confirms trend
     """
