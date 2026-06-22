@@ -42,7 +42,7 @@ class RiskManager:
     def __init__(
         self,
         client: MT5Client,
-        risk_per_trade: float = 0.05,
+        risk_per_trade: float = 0.005,
         max_daily_drawdown: float = 0.05,
         max_open_positions: int = 5,
     ) -> None:
@@ -166,6 +166,10 @@ class RiskManager:
                 state = self.check_risk_state()
                 logger.info(f"Current actual leverage: {state.leverage_ratio:.2f}x, margin: {state.margin_usage_pct:.1f}%")
 
+                # Emergency equity protection: stop trading if equity drops below $850k
+                if state.equity < 850000.0:
+                    return False, f"Equity protection: below $850,000 threshold (current: ${state.equity:,.2f})"
+
                 if state.margin_usage_pct > 85.0:
                     return False, f"Margin usage {state.margin_usage_pct:.1f}% exceeds 85%"
                 if state.leverage_ratio > 26.0:
@@ -173,8 +177,8 @@ class RiskManager:
                         "Leverage approaching cap: %.1fx (competition penalty threshold is 28x)",
                         state.leverage_ratio,
                     )
-                if state.current_drawdown_pct > 15.0:
-                    return False, f"Drawdown {state.current_drawdown_pct:.1f}% exceeds 15%"
+                if state.current_drawdown_pct > 8.0:
+                    return False, f"Drawdown {state.current_drawdown_pct:.1f}% exceeds 8%"
 
                 return True, "OK"
             except Exception as exc:
@@ -190,6 +194,52 @@ class RiskManager:
                 return self.client.close_all_positions()
             except Exception as exc:
                 logger.exception("Emergency close all failed")
+                return []
+
+    def add_hedges(self, client: MT5Client) -> List[OrderResult]:
+        """Check all open positions for unrealized loss > $2000; open small opposing hedge position if triggered.
+        
+        Hedge sizing: 0.1x of position volume to limit losses without full reversal.
+        Returns list of hedge order results.
+        """
+        with _span("RiskManager.add_hedges"):
+            results = []
+            try:
+                state = client.get_account_info()
+                for position in state.active_positions:
+                    if position.unrealized_profit is None or position.unrealized_profit >= -2000.0:
+                        # Position is either profit or loss < $2000 threshold
+                        continue
+                    
+                    # Position has unrealized loss > $2000; open opposing hedge
+                    try:
+                        hedge_volume = max(
+                            mt5.symbol_info(position.symbol).volume_min,
+                            round(position.volume * 0.1, 2)
+                        )
+                        
+                        hedge_action = "SELL" if position.volume > 0 else "BUY"
+                        logger.info(
+                            "Opening hedge for %s (unrealized loss: $%.2f, hedge volume: %.2f)",
+                            position.symbol,
+                            position.unrealized_profit,
+                            hedge_volume,
+                        )
+                        
+                        hedge_result = client.place_order(
+                            symbol=position.symbol,
+                            action=hedge_action,
+                            volume=hedge_volume,
+                            order_type="MARKET",
+                        )
+                        results.append(hedge_result)
+                    except Exception as exc:
+                        logger.exception("Failed to place hedge for %s", position.symbol)
+                        continue
+                
+                return results
+            except Exception as exc:
+                logger.exception("Hedge check failed")
                 return []
 
     def check_concentration(self, new_symbol: str, new_notional: float) -> bool:
@@ -267,26 +317,13 @@ class RiskManager:
                 return 0.0
 
     def check_directional_exposure(self, signal) -> bool:
-        """Return True if adding signal keeps net directional exposure below 95%.
+        """Return True if adding signal keeps net directional exposure below 80%.
         
-        Safety rule: Only enforce directional limits at high leverage (>15x).
-        At low leverage, directional checks pass automatically to allow strategies to scale up.
-        Rules restrict "near-full-leverage" directional scenarios, not modest directional positions.
+        Strict directional limit to prevent one-sided bets that amplify losses.
         """
         with _span("RiskManager.check_directional_exposure"):
             try:
                 state = self.check_risk_state()
-                
-                # At low leverage (<=15x), allow all directional exposures. Rules restrict "near-full-leverage" scenarios.
-                if state.leverage_ratio <= 15.0:
-                    logger.debug(
-                        "Leverage %.1fx is below 15x threshold; directional check bypassed for %s %s",
-                        state.leverage_ratio,
-                        signal.action,
-                        signal.symbol,
-                    )
-                    return True
-                
                 signal_notional = float(signal.volume) * float(signal.entry_price)
 
                 # Current portfolio directional exposure (existing positions only)
@@ -301,20 +338,8 @@ class RiskManager:
                     if p.volume < 0
                 )
                 current_total = current_long + current_short
-                current_directional = 0.0
-                if current_total > 0:
-                    current_directional = abs(current_long - current_short) / current_total * 100.0
 
-                # If already concentrated at high leverage, allow signal through (we can't fix historic concentration)
-                if current_directional >= 95.0:
-                    logger.debug(
-                        "Portfolio already at %.1f%% directional at %.1fx leverage; allowing signal through",
-                        current_directional,
-                        state.leverage_ratio,
-                    )
-                    return True
-
-                # Otherwise, simulate adding the signal and block only if it would push over 95%
+                # Simulate adding the signal
                 if signal.action.upper() == "BUY":
                     new_long = current_long + signal_notional
                     new_short = current_short
@@ -327,10 +352,11 @@ class RiskManager:
                     return True
 
                 new_directional = abs(new_long - new_short) / new_total * 100.0
-                if new_directional > 95.0:
+                
+                # Block if signal would push directional exposure over 80%
+                if new_directional > 80.0:
                     logger.warning(
-                        "Directional exposure would exceed 95%% at %.1fx leverage after adding signal: %.1f%% (signal: %s %s)",
-                        state.leverage_ratio,
+                        "Directional exposure would exceed 80%% after adding signal: %.1f%% (signal: %s %s)",
                         new_directional,
                         signal.action,
                         signal.symbol,

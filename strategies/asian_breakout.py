@@ -56,9 +56,9 @@ class AsianBreakoutStrategy:
         "EURCHF",
     ]
     min_range_pips: float = 20.0
-    risk_per_trade: float = 0.05
+    risk_per_trade: float = 0.005
     atr_period: int = 14
-    atr_stop_mult: float = 1.5
+    atr_stop_mult: float = 0.3
 
     def __init__(
         self,
@@ -124,8 +124,8 @@ class AsianBreakoutStrategy:
                     if bullish_sweep and market_structure == "BULLISH_MSS":
                         entry = current_close
                         atr_value = calculate_atr(candles, self.atr_period)
-                        stop_loss = current_low - atr_value * 0.5
-                        take_profit = entry + range_width * 1.2
+                        stop_loss = current_low - atr_value * 0.3
+                        take_profit = entry + range_width * 0.8
                         stop_loss_pips = self._price_diff_to_pips(symbol, abs(entry - stop_loss))
                         volume = risk_manager.calculate_position_size(symbol, stop_loss_pips, self.risk_per_trade)
                         if volume <= 0:
@@ -146,8 +146,8 @@ class AsianBreakoutStrategy:
                     elif bearish_sweep and market_structure == "BEARISH_MSS":
                         entry = current_close
                         atr_value = calculate_atr(candles, self.atr_period)
-                        stop_loss = current_high + atr_value * 0.5
-                        take_profit = entry - range_width * 1.2
+                        stop_loss = current_high + atr_value * 0.3
+                        take_profit = entry - range_width * 0.8
                         stop_loss_pips = self._price_diff_to_pips(symbol, abs(entry - stop_loss))
                         volume = risk_manager.calculate_position_size(symbol, stop_loss_pips, self.risk_per_trade)
                         if volume <= 0:

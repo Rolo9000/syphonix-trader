@@ -50,7 +50,7 @@ class BarbellStrategy:
         "SOLUSD",
         "XRPUSD",
     ]
-    rebalance_threshold: float = 0.05
+    rebalance_threshold: float = 0.10
     target_weights: Dict[str, float] = {
         "XAUUSD": 0.30,
         "XAGUSD": 0.10,
@@ -59,7 +59,7 @@ class BarbellStrategy:
         "SOLUSD": 0.10,
         "XRPUSD": 0.10,
     }
-    total_allocation_pct: float = 0.40
+    total_allocation_pct: float = 0.15
 
     def __init__(
         self,
@@ -127,7 +127,11 @@ class BarbellStrategy:
             return {symbol: exposures[symbol] / total for symbol in self.symbols}
 
     def generate_rebalance_signals(self, client: MT5Client, risk_manager: RiskManager) -> List[TradeSignal]:
-        """Generate rebalancing trade signals when weights drift outside tolerance."""
+        """Generate rebalancing trade signals when weights drift outside tolerance.
+        
+        Conservative implementation: 15% total allocation, 10% rebalance threshold, 
+        $50k position cap, tight stops (0.8x ATR), tight profits (1.0x ATR).
+        """
         signals: List[TradeSignal] = []
         with _span("BarbellStrategy.generate_rebalance_signals"):
             safe, reason = risk_manager.is_safe_to_trade()
@@ -166,15 +170,35 @@ class BarbellStrategy:
                         logger.warning("ATR calculation failed for %s, using fallback volatility", symbol)
                         atr = float(entry_price) * 0.01
 
+                    # Conservative stops: 0.8x ATR, tight profits: 1.0x ATR
                     if action == "BUY":
-                        stop_loss = float(entry_price - atr * 1.5)
-                        take_profit = float(entry_price + atr * 2.0)
+                        stop_loss = float(entry_price - atr * 0.8)
+                        take_profit = float(entry_price + atr * 1.0)
                     else:
-                        stop_loss = float(entry_price + atr * 1.5)
-                        take_profit = float(entry_price - atr * 2.0)
+                        stop_loss = float(entry_price + atr * 0.8)
+                        take_profit = float(entry_price - atr * 1.0)
 
                     stop_loss_pips = float(abs(entry_price - stop_loss) * (100.0 if symbol.endswith("JPY") else 10000.0))
-                    volume = float(risk_manager.calculate_position_size(symbol, stop_loss_pips, risk_manager.risk_per_trade)) * 10
+                    volume = float(risk_manager.calculate_position_size(symbol, stop_loss_pips, risk_manager.risk_per_trade))
+                    if volume <= 0.0:
+                        continue
+
+                    # Cap position at $50k notional maximum
+                    try:
+                        tick = mt5.symbol_info_tick(symbol)
+                        if tick:
+                            price = (float(tick.bid) + float(tick.ask)) / 2.0
+                            symbol_info = mt5.symbol_info(symbol)
+                            if symbol_info:
+                                contract_size = float(symbol_info.trade_contract_size)
+                                position_notional = volume * price * contract_size
+                                if position_notional > 50000.0:
+                                    volume = 50000.0 / (price * contract_size)
+                                    volume = round(round(volume / float(symbol_info.volume_step)) * float(symbol_info.volume_step), 8)
+                                    volume = max(float(symbol_info.volume_min), volume)
+                    except Exception:
+                        logger.warning("Position cap check failed for %s", symbol)
+
                     if volume <= 0.0:
                         continue
 

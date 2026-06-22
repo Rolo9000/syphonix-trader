@@ -50,15 +50,15 @@ async def execute_trading_cycle(
             logger.warning("Emergency stop is active; skipping trading cycle")
             return
 
-        # Check for leverage drift and actively reduce positions if needed
-        reduction_results = risk_manager.reduce_positions_if_leverage_high()
-        if reduction_results:
-            logger.info("Closed %d positions due to leverage drift", sum(1 for r in reduction_results if r.success))
-
         safe, reason = risk_manager.is_safe_to_trade()
         if not safe:
             logger.warning("Trading is not safe: %s", reason)
             return
+
+        # Check positions for unrealized losses and add hedges if needed
+        hedge_results = risk_manager.add_hedges(client)
+        if hedge_results:
+            logger.info("Opened %d hedge positions", sum(1 for r in hedge_results if r.success))
 
         if is_news_blackout():
             logger.warning("News blackout active; skipping trading cycle")
@@ -186,7 +186,7 @@ def build_scheduler(
     scheduler.add_job(
         lambda: loop.call_soon_threadsafe(asyncio.create_task, execute_trading_cycle(client, risk_manager, state_store, asian_breakout, barbell)),
         "interval",
-        minutes=2,
+        minutes=5,
         id="execute_trading_cycle",
         replace_existing=True,
     )
