@@ -152,6 +152,14 @@ class BarbellStrategy:
             base_allocation = float(state.equity) * float(self.total_allocation_pct)
             current_exposures = self._current_notional(client)
             current_weights = self.get_current_weights(client)
+            
+            # Track existing position directions to prevent stacking
+            existing_positions = {}
+            for pos in client.get_open_positions():
+                if pos.symbol in self.symbols:
+                    # Positive volume = BUY, Negative = SELL
+                    direction = "BUY" if pos.volume > 0 else "SELL"
+                    existing_positions[pos.symbol] = direction
 
             # Step 1: Calculate trend strength for all symbols and compute dynamic weights
             trend_data = {}
@@ -206,11 +214,16 @@ class BarbellStrategy:
                     # Determine action - but only trade WITH the trend if trend is strong
                     raw_action = "BUY" if notional_diff > 0 else "SELL"
                     
-                    # Skip trades against strong trends (leader lesson: follow the trend)
-                    if trend_strength >= 0.5:
+                    # CRITICAL: Don't stack positions in the same direction
+                    if symbol in existing_positions and existing_positions[symbol] == raw_action:
+                        logger.debug("Skipping %s %s - already have %s position", raw_action, symbol, raw_action)
+                        continue
+                    
+                    # Skip trades against trends (lowered threshold from 0.5 to 0.3 to avoid counter-trend losses)
+                    if trend_strength >= 0.3:
                         if (trend_direction == "UP" and raw_action == "SELL") or \
                            (trend_direction == "DOWN" and raw_action == "BUY"):
-                            logger.info("Skipping %s %s - against strong trend (%s, strength=%.2f)",
+                            logger.info("Skipping %s %s - against trend (%s, strength=%.2f)",
                                        raw_action, symbol, trend_direction, trend_strength)
                             continue
                     

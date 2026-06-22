@@ -102,8 +102,16 @@ class AsianBreakoutStrategy:
         """
         signals: List[TradeSignal] = []
         with _span("AsianBreakoutStrategy.generate_signals"):
+            # Get existing positions to avoid stacking
+            open_positions = {p.symbol for p in client.get_open_positions()}
+            
             for symbol in self.symbols:
                 try:
+                    # Skip if we already have a position in this symbol
+                    if symbol in open_positions:
+                        logger.debug("Skipping %s - already have open position", symbol)
+                        continue
+                    
                     session_range = calculate_asian_range(client, symbol)
                     if session_range is None:
                         logger.debug("No Asian range for %s", symbol)
@@ -147,7 +155,7 @@ class AsianBreakoutStrategy:
                     
                     # Only take bullish breakout if trend is UP or NEUTRAL (not against DOWN trend)
                     if bullish_sweep and market_structure == "BULLISH_MSS":
-                        if trend_direction == "DOWN" and trend_strength >= 0.5:
+                        if trend_direction == "DOWN" and trend_strength >= 0.3:
                             logger.info("Skipping bullish breakout on %s - against DOWN trend (strength=%.2f)", symbol, trend_strength)
                             continue
                         
@@ -209,7 +217,7 @@ class AsianBreakoutStrategy:
                         )
                     # Only take bearish breakout if trend is DOWN or NEUTRAL (not against UP trend)
                     elif bearish_sweep and market_structure == "BEARISH_MSS":
-                        if trend_direction == "UP" and trend_strength >= 0.5:
+                        if trend_direction == "UP" and trend_strength >= 0.3:
                             logger.info("Skipping bearish breakout on %s - against UP trend (strength=%.2f)", symbol, trend_strength)
                             continue
                         
