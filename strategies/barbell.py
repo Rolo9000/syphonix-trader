@@ -256,13 +256,13 @@ class BarbellStrategy:
                         logger.warning("ATR calculation failed for %s, using fallback volatility", symbol)
                         atr = float(entry_price) * 0.01
 
-                    # Conservative stops: 0.8x ATR, tighter profits: 0.7x ATR (exit faster for better capture rate)
+                    # Wider profits to capture larger moves: 1.5x ATR TP, 1.0x ATR SL (1.5:1 R:R)
                     if action == "BUY":
-                        stop_loss = float(entry_price - atr * 0.8)
-                        take_profit = float(entry_price + atr * 0.7)
+                        stop_loss = float(entry_price - atr * 1.0)
+                        take_profit = float(entry_price + atr * 1.5)
                     else:
-                        stop_loss = float(entry_price + atr * 0.8)
-                        take_profit = float(entry_price - atr * 0.7)
+                        stop_loss = float(entry_price + atr * 1.0)
+                        take_profit = float(entry_price - atr * 1.5)
                     
                     # SANITY CHECK: TP must be profitable
                     if action == "BUY" and take_profit <= entry_price:
@@ -314,7 +314,7 @@ class BarbellStrategy:
                     if volume <= 0.0:
                         continue
 
-                    # Cap position at $50k notional maximum
+                    # Cap position at $100k notional maximum (increased for bigger winners)
                     try:
                         tick = mt5.symbol_info_tick(symbol)
                         if tick:
@@ -323,8 +323,8 @@ class BarbellStrategy:
                             if symbol_info:
                                 contract_size = float(symbol_info.trade_contract_size)
                                 position_notional = volume * price * contract_size
-                                if position_notional > 50000.0:
-                                    volume = 50000.0 / (price * contract_size)
+                                if position_notional > 100000.0:
+                                    volume = 100000.0 / (price * contract_size)
                                     volume = round(round(volume / float(symbol_info.volume_step)) * float(symbol_info.volume_step), 8)
                                     volume = max(float(symbol_info.volume_min), volume)
                     except Exception:
