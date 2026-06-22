@@ -196,6 +196,9 @@ class RiskManager:
                 logger.exception("Emergency close all failed")
                 return []
 
+    # Symbols to exclude from hedging (let existing positions ride)
+    HEDGE_EXCLUSIONS = {"XAGUSD"}
+    
     def add_hedges(self, client: MT5Client) -> List[OrderResult]:
         """Check all open positions for unrealized loss > $2000; open small opposing hedge position if triggered.
         
@@ -207,6 +210,11 @@ class RiskManager:
             try:
                 state = client.get_account_info()
                 for position in state.active_positions:
+                    # Skip excluded symbols (legacy positions we want to let ride)
+                    if position.symbol in self.HEDGE_EXCLUSIONS:
+                        logger.debug("Skipping hedge for excluded symbol: %s", position.symbol)
+                        continue
+                    
                     if position.unrealized_profit is None or position.unrealized_profit >= -2000.0:
                         # Position is either profit or loss < $2000 threshold
                         continue
