@@ -215,7 +215,7 @@ class RiskManager:
                         logger.debug("Skipping hedge for excluded symbol: %s", position.symbol)
                         continue
                     
-                    if position.unrealized_profit is None or position.unrealized_profit >= -2000.0:
+                    if position.profit is None or position.profit >= -2000.0:
                         # Position is either profit or loss < $2000 threshold
                         continue
                     
@@ -230,7 +230,7 @@ class RiskManager:
                         logger.info(
                             "Opening hedge for %s (unrealized loss: $%.2f, hedge volume: %.2f)",
                             position.symbol,
-                            position.unrealized_profit,
+                            position.profit,
                             hedge_volume,
                         )
                         
@@ -325,14 +325,25 @@ class RiskManager:
                 return 0.0
 
     def check_directional_exposure(self, signal) -> bool:
-        """Return True if adding signal keeps net directional exposure below 80%.
+        """Return True if adding signal keeps directional exposure manageable.
         
-        Strict directional limit to prevent one-sided bets that amplify losses.
+        Tiered approach based on leverage:
+        - Low leverage (≤5x): Allow all trades regardless of directional exposure
+        - Medium leverage (5-15x): Allow trades that reduce or maintain exposure, or if < 90%
+        - High leverage (>15x): Strict 80% limit
         """
         with _span("RiskManager.check_directional_exposure"):
             try:
                 state = self.check_risk_state()
                 signal_notional = float(signal.volume) * float(signal.entry_price)
+
+                # At low leverage, directional concentration is less risky
+                if state.leverage_ratio <= 5.0:
+                    logger.debug(
+                        "Leverage %.1fx ≤ 5x; directional check bypassed for %s %s",
+                        state.leverage_ratio, signal.action, signal.symbol
+                    )
+                    return True
 
                 # Current portfolio directional exposure (existing positions only)
                 current_long = sum(
@@ -346,6 +357,9 @@ class RiskManager:
                     if p.volume < 0
                 )
                 current_total = current_long + current_short
+                current_directional = 0.0
+                if current_total > 0:
+                    current_directional = abs(current_long - current_short) / current_total * 100.0
 
                 # Simulate adding the signal
                 if signal.action.upper() == "BUY":
@@ -361,13 +375,21 @@ class RiskManager:
 
                 new_directional = abs(new_long - new_short) / new_total * 100.0
                 
-                # Block if signal would push directional exposure over 80%
+                # Medium leverage (5-15x): Allow if improves exposure or stays under 90%
+                if state.leverage_ratio <= 15.0:
+                    if new_directional <= current_directional or new_directional <= 90.0:
+                        return True
+                    logger.warning(
+                        "Directional exposure would increase to %.1f%% at %.1fx leverage (signal: %s %s)",
+                        new_directional, state.leverage_ratio, signal.action, signal.symbol
+                    )
+                    return False
+                
+                # High leverage (>15x): Strict 80% limit
                 if new_directional > 80.0:
                     logger.warning(
-                        "Directional exposure would exceed 80%% after adding signal: %.1f%% (signal: %s %s)",
-                        new_directional,
-                        signal.action,
-                        signal.symbol,
+                        "Directional exposure would exceed 80%% at %.1fx leverage: %.1f%% (signal: %s %s)",
+                        state.leverage_ratio, new_directional, signal.action, signal.symbol
                     )
                     return False
 
