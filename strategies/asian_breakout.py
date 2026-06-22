@@ -28,6 +28,10 @@ from core.indicators import (
 from core.models import TradeSignal
 from core.mt5_client import MT5Client
 from core.risk_manager import RiskManager
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from infra.state_store import StateStore
 
 logger = logging.getLogger(__name__)
 
@@ -87,12 +91,13 @@ class AsianBreakoutStrategy:
             return abs(diff) * 100.0
         return abs(diff) * 10000.0
 
-    def generate_signals(self, client: MT5Client, risk_manager: RiskManager) -> List[TradeSignal]:
+    def generate_signals(self, client: MT5Client, risk_manager: RiskManager, state_store: "StateStore | None" = None) -> List[TradeSignal]:
         """Generate breakout signals with trend confirmation.
         
         Hybrid approach:
         - Only trade breakouts in the direction of the underlying trend
         - Scale position size by trend strength (0.5x to 1.5x)
+        - Sentiment boost: +30% volume when sentiment aligns
         - Boost confidence when trend confirms breakout
         """
         signals: List[TradeSignal] = []
@@ -136,6 +141,10 @@ class AsianBreakoutStrategy:
 
                     market_structure = detect_market_structure_shift(candles)
                     
+                    # Get spread for filtering
+                    bid, ask = client.get_current_price(symbol)
+                    spread = float(ask - bid)
+                    
                     # Only take bullish breakout if trend is UP or NEUTRAL (not against DOWN trend)
                     if bullish_sweep and market_structure == "BULLISH_MSS":
                         if trend_direction == "DOWN" and trend_strength >= 0.5:
@@ -146,6 +155,14 @@ class AsianBreakoutStrategy:
                         atr_value = calculate_atr(candles, self.atr_period)
                         stop_loss = current_low - atr_value * 0.3
                         take_profit = entry + range_width * 0.6
+                        
+                        # Spread filter: skip if spread > 30% of TP distance
+                        tp_distance = abs(take_profit - entry)
+                        if spread > tp_distance * 0.30:
+                            logger.info("Skipping BUY %s - spread %.5f > 30%% of TP distance %.5f",
+                                       symbol, spread, tp_distance)
+                            continue
+                        
                         stop_loss_pips = self._price_diff_to_pips(symbol, abs(entry - stop_loss))
                         
                         # Scale volume by trend confirmation (0.5x if neutral, 1.5x if trend confirms)
@@ -156,6 +173,22 @@ class AsianBreakoutStrategy:
                         else:
                             volume = base_volume * 0.5  # Reduced size without trend confirmation
                             signal_confidence = 0.65
+                        
+                        # Sentiment boost: +30% when sentiment aligns with BUY
+                        if state_store is not None:
+                            try:
+                                sentiment_result = state_store.get_sentiment(symbol)
+                                if sentiment_result:
+                                    sentiment = sentiment_result.sentiment.upper()
+                                    if sentiment == "BULLISH":
+                                        volume = volume * 1.30
+                                        logger.info("%s BULLISH sentiment aligns with BUY - boosting volume 30%%", symbol)
+                                    elif sentiment == "BEARISH":
+                                        volume = volume * 0.70
+                                        logger.info("%s BEARISH sentiment opposes BUY - reducing volume 30%%", symbol)
+                            except Exception:
+                                pass
+                        
                         if volume <= 0:
                             continue
                             
@@ -184,6 +217,14 @@ class AsianBreakoutStrategy:
                         atr_value = calculate_atr(candles, self.atr_period)
                         stop_loss = current_high + atr_value * 0.3
                         take_profit = entry - range_width * 0.6
+                        
+                        # Spread filter: skip if spread > 30% of TP distance
+                        tp_distance = abs(take_profit - entry)
+                        if spread > tp_distance * 0.30:
+                            logger.info("Skipping SELL %s - spread %.5f > 30%% of TP distance %.5f",
+                                       symbol, spread, tp_distance)
+                            continue
+                        
                         stop_loss_pips = self._price_diff_to_pips(symbol, abs(entry - stop_loss))
                         
                         # Scale volume by trend confirmation
@@ -194,6 +235,21 @@ class AsianBreakoutStrategy:
                         else:
                             volume = base_volume * 0.5  # Reduced size without trend confirmation
                             signal_confidence = 0.65
+                        
+                        # Sentiment boost: +30% when sentiment aligns with SELL
+                        if state_store is not None:
+                            try:
+                                sentiment_result = state_store.get_sentiment(symbol)
+                                if sentiment_result:
+                                    sentiment = sentiment_result.sentiment.upper()
+                                    if sentiment == "BEARISH":
+                                        volume = volume * 1.30
+                                        logger.info("%s BEARISH sentiment aligns with SELL - boosting volume 30%%", symbol)
+                                    elif sentiment == "BULLISH":
+                                        volume = volume * 0.70
+                                        logger.info("%s BULLISH sentiment opposes SELL - reducing volume 30%%", symbol)
+                            except Exception:
+                                pass
                         
                         if volume <= 0:
                             continue

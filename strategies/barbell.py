@@ -24,6 +24,10 @@ from core.indicators import calculate_atr, calculate_portfolio_weights, calculat
 from core.models import TradeSignal
 from core.mt5_client import MT5Client
 from core.risk_manager import RiskManager
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from infra.state_store import StateStore
 
 logger = logging.getLogger(__name__)
 
@@ -126,14 +130,15 @@ class BarbellStrategy:
                 return {symbol: 0.0 for symbol in self.symbols}
             return {symbol: exposures[symbol] / total for symbol in self.symbols}
 
-    def generate_rebalance_signals(self, client: MT5Client, risk_manager: RiskManager) -> List[TradeSignal]:
+    def generate_rebalance_signals(self, client: MT5Client, risk_manager: RiskManager, state_store: "StateStore | None" = None) -> List[TradeSignal]:
         """Generate rebalancing trade signals with trend-weighted allocation.
         
         Hybrid approach inspired by competition leaders:
-        - Base allocation: 15% of equity across all assets
+        - Base allocation: 35% of equity across all assets
         - Trend boost: Up to 2.5x weight for strongly trending assets
+        - Sentiment boost: +30% volume when sentiment aligns with trend
         - Confidence-based sizing: 0.5x volume for neutral, 1.5x for strong trends
-        - Conservative stops (0.8x ATR) and tight profits (1.0x ATR)
+        - Conservative stops (0.8x ATR) and tight profits (0.7x ATR)
         - $50k position cap per trade
         """
         signals: List[TradeSignal] = []
@@ -189,7 +194,9 @@ class BarbellStrategy:
                     if abs(drift) <= effective_threshold:
                         continue
 
-                    current_price = float(client.get_current_price(symbol)[0])
+                    bid, ask = client.get_current_price(symbol)
+                    current_price = float(bid)
+                    spread = float(ask - bid)
                     desired_notional = float(base_allocation) * dynamic_weight
                     current_notional = float(current_exposures.get(symbol, 0.0))
                     notional_diff = float(desired_notional - current_notional)
@@ -227,6 +234,13 @@ class BarbellStrategy:
                         stop_loss = float(entry_price + atr * 0.8)
                         take_profit = float(entry_price - atr * 0.7)
 
+                    # Spread filter: skip if spread > 30% of TP distance (kills profitability at high frequency)
+                    tp_distance = abs(take_profit - entry_price)
+                    if spread > tp_distance * 0.30:
+                        logger.info("Skipping %s %s - spread %.5f > 30%% of TP distance %.5f",
+                                   action, symbol, spread, tp_distance)
+                        continue
+
                     stop_loss_pips = float(abs(entry_price - stop_loss) * (100.0 if symbol.endswith("JPY") else 10000.0))
                     base_volume = float(risk_manager.calculate_position_size(symbol, stop_loss_pips, risk_manager.risk_per_trade))
                     
@@ -235,6 +249,29 @@ class BarbellStrategy:
                     # - Strong trend (1.0): 1.5x volume (leader-style conviction)
                     confidence_multiplier = 0.5 + (trend_strength * 1.0)  # Range: 0.5 to 1.5
                     volume = base_volume * confidence_multiplier
+                    
+                    # Sentiment boost: +30% when sentiment aligns with trend/action
+                    sentiment_boost = 1.0
+                    if state_store is not None:
+                        try:
+                            sentiment_result = state_store.get_sentiment(symbol)
+                            if sentiment_result:
+                                sentiment = sentiment_result.sentiment.upper()
+                                # Boost if sentiment aligns with action
+                                if (sentiment == "BULLISH" and action == "BUY") or \
+                                   (sentiment == "BEARISH" and action == "SELL"):
+                                    sentiment_boost = 1.30  # +30% volume
+                                    logger.info("%s sentiment %s aligns with %s - boosting volume 30%%",
+                                               symbol, sentiment, action)
+                                # Reduce if sentiment opposes action
+                                elif (sentiment == "BULLISH" and action == "SELL") or \
+                                     (sentiment == "BEARISH" and action == "BUY"):
+                                    sentiment_boost = 0.70  # -30% volume
+                                    logger.info("%s sentiment %s opposes %s - reducing volume 30%%",
+                                               symbol, sentiment, action)
+                        except Exception:
+                            pass  # Sentiment unavailable, use default
+                    volume = volume * sentiment_boost
                     
                     if volume <= 0.0:
                         continue

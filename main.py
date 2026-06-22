@@ -66,12 +66,12 @@ async def execute_trading_cycle(
 
         signals: list = []
         try:
-            signals.extend(asian_breakout.generate_signals(client, risk_manager))
+            signals.extend(asian_breakout.generate_signals(client, risk_manager, state_store))
         except Exception:
             logger.exception("Asian breakout signal generation failed")
 
         try:
-            signals.extend(barbell.generate_rebalance_signals(client, risk_manager))
+            signals.extend(barbell.generate_rebalance_signals(client, risk_manager, state_store))
         except Exception:
             logger.exception("Barbell rebalance signal generation failed")
 
