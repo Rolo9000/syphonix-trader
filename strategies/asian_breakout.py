@@ -23,6 +23,7 @@ from core.indicators import (
     calculate_asian_range,
     calculate_atr,
     detect_market_structure_shift,
+    calculate_trend_strength,
 )
 from core.models import TradeSignal
 from core.mt5_client import MT5Client
@@ -87,7 +88,13 @@ class AsianBreakoutStrategy:
         return abs(diff) * 10000.0
 
     def generate_signals(self, client: MT5Client, risk_manager: RiskManager) -> List[TradeSignal]:
-        """Generate breakout signals for configured symbols."""
+        """Generate breakout signals with trend confirmation.
+        
+        Hybrid approach:
+        - Only trade breakouts in the direction of the underlying trend
+        - Scale position size by trend strength (0.5x to 1.5x)
+        - Boost confidence when trend confirms breakout
+        """
         signals: List[TradeSignal] = []
         with _span("AsianBreakoutStrategy.generate_signals"):
             for symbol in self.symbols:
@@ -109,6 +116,13 @@ class AsianBreakoutStrategy:
                         logger.debug("No M5 candles for %s", symbol)
                         continue
 
+                    # Get H1 candles for trend detection
+                    try:
+                        h1_candles = client.get_candles(symbol, mt5.TIMEFRAME_H1, 30)
+                        trend_direction, trend_strength = calculate_trend_strength(h1_candles)
+                    except Exception:
+                        trend_direction, trend_strength = "NEUTRAL", 0.0
+
                     latest = candles.iloc[-1]
                     current_low = float(latest["low"])
                     current_high = float(latest["high"])
@@ -121,15 +135,32 @@ class AsianBreakoutStrategy:
                         continue
 
                     market_structure = detect_market_structure_shift(candles)
+                    
+                    # Only take bullish breakout if trend is UP or NEUTRAL (not against DOWN trend)
                     if bullish_sweep and market_structure == "BULLISH_MSS":
+                        if trend_direction == "DOWN" and trend_strength >= 0.5:
+                            logger.info("Skipping bullish breakout on %s - against DOWN trend (strength=%.2f)", symbol, trend_strength)
+                            continue
+                        
                         entry = current_close
                         atr_value = calculate_atr(candles, self.atr_period)
                         stop_loss = current_low - atr_value * 0.3
                         take_profit = entry + range_width * 0.8
                         stop_loss_pips = self._price_diff_to_pips(symbol, abs(entry - stop_loss))
-                        volume = risk_manager.calculate_position_size(symbol, stop_loss_pips, self.risk_per_trade)
+                        
+                        # Scale volume by trend confirmation (0.5x if neutral, 1.5x if trend confirms)
+                        base_volume = risk_manager.calculate_position_size(symbol, stop_loss_pips, self.risk_per_trade)
+                        if trend_direction == "UP":
+                            volume = base_volume * (0.5 + trend_strength * 1.0)  # 0.5x to 1.5x
+                            signal_confidence = 0.70 + (trend_strength * 0.25)
+                        else:
+                            volume = base_volume * 0.5  # Reduced size without trend confirmation
+                            signal_confidence = 0.65
                         if volume <= 0:
                             continue
+                            
+                        logger.info("BUY signal: %s vol=%.2f (trend=%s, strength=%.2f, conf=%.2f)",
+                                   symbol, volume, trend_direction, trend_strength, signal_confidence)
                         signals.append(
                             TradeSignal(
                                 symbol=symbol,
@@ -139,19 +170,36 @@ class AsianBreakoutStrategy:
                                 take_profit=take_profit,
                                 volume=volume,
                                 strategy_name="AsianBreakout",
-                                confidence=0.75,
+                                confidence=signal_confidence,
                                 timestamp=datetime.utcnow(),
                             )
                         )
+                    # Only take bearish breakout if trend is DOWN or NEUTRAL (not against UP trend)
                     elif bearish_sweep and market_structure == "BEARISH_MSS":
+                        if trend_direction == "UP" and trend_strength >= 0.5:
+                            logger.info("Skipping bearish breakout on %s - against UP trend (strength=%.2f)", symbol, trend_strength)
+                            continue
+                        
                         entry = current_close
                         atr_value = calculate_atr(candles, self.atr_period)
                         stop_loss = current_high + atr_value * 0.3
                         take_profit = entry - range_width * 0.8
                         stop_loss_pips = self._price_diff_to_pips(symbol, abs(entry - stop_loss))
-                        volume = risk_manager.calculate_position_size(symbol, stop_loss_pips, self.risk_per_trade)
+                        
+                        # Scale volume by trend confirmation
+                        base_volume = risk_manager.calculate_position_size(symbol, stop_loss_pips, self.risk_per_trade)
+                        if trend_direction == "DOWN":
+                            volume = base_volume * (0.5 + trend_strength * 1.0)  # 0.5x to 1.5x
+                            signal_confidence = 0.70 + (trend_strength * 0.25)
+                        else:
+                            volume = base_volume * 0.5  # Reduced size without trend confirmation
+                            signal_confidence = 0.65
+                        
                         if volume <= 0:
                             continue
+                        
+                        logger.info("SELL signal: %s vol=%.2f (trend=%s, strength=%.2f, conf=%.2f)",
+                                   symbol, volume, trend_direction, trend_strength, signal_confidence)
                         signals.append(
                             TradeSignal(
                                 symbol=symbol,
@@ -161,7 +209,7 @@ class AsianBreakoutStrategy:
                                 take_profit=take_profit,
                                 volume=volume,
                                 strategy_name="AsianBreakout",
-                                confidence=0.75,
+                                confidence=signal_confidence,
                                 timestamp=datetime.utcnow(),
                             )
                         )

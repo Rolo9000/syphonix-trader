@@ -64,6 +64,74 @@ def calculate_atr(df: pd.DataFrame, period: int = 14) -> float:
         return atr_value
 
 
+def calculate_trend_strength(df: pd.DataFrame, fast_period: int = 8, slow_period: int = 21) -> tuple[str, float]:
+    """Calculate trend direction and strength using EMA crossover and momentum.
+    
+    Returns:
+        tuple: (direction, strength) where:
+            - direction: "UP", "DOWN", or "NEUTRAL"
+            - strength: 0.0 to 1.0 (0 = no trend, 1 = strong trend)
+    
+    Strategy:
+        - EMA crossover determines direction
+        - Distance between EMAs relative to ATR determines strength
+        - Recent price momentum confirms trend
+    """
+    with _span("calculate_trend_strength"):
+        try:
+            if len(df) < slow_period + 5:
+                return "NEUTRAL", 0.0
+            
+            close = df["close"].astype(float)
+            
+            # Calculate EMAs
+            ema_fast = close.ewm(span=fast_period, adjust=False).mean()
+            ema_slow = close.ewm(span=slow_period, adjust=False).mean()
+            
+            # Current EMA values
+            fast_now = float(ema_fast.iloc[-1])
+            slow_now = float(ema_slow.iloc[-1])
+            current_price = float(close.iloc[-1])
+            
+            # Direction from EMA crossover
+            if fast_now > slow_now and current_price > fast_now:
+                direction = "UP"
+            elif fast_now < slow_now and current_price < fast_now:
+                direction = "DOWN"
+            else:
+                direction = "NEUTRAL"
+            
+            # Calculate strength (EMA separation normalized by ATR)
+            try:
+                atr = calculate_atr(df, 14)
+                ema_separation = abs(fast_now - slow_now)
+                # Normalize: separation of 2x ATR = full strength
+                raw_strength = min(1.0, ema_separation / (atr * 2.0))
+            except Exception:
+                raw_strength = 0.3  # Fallback if ATR fails
+            
+            # Momentum confirmation: price change over last 5 bars
+            price_5_ago = float(close.iloc[-6]) if len(close) > 5 else current_price
+            momentum = (current_price - price_5_ago) / price_5_ago if price_5_ago != 0 else 0.0
+            
+            # Boost strength if momentum confirms direction
+            if (direction == "UP" and momentum > 0.002) or (direction == "DOWN" and momentum < -0.002):
+                strength = min(1.0, raw_strength * 1.3)  # 30% boost for confirmation
+            elif (direction == "UP" and momentum < 0) or (direction == "DOWN" and momentum > 0):
+                strength = raw_strength * 0.5  # Halve if momentum contradicts
+            else:
+                strength = raw_strength
+            
+            logger.debug("Trend analysis: direction=%s, strength=%.2f, ema_sep=%.4f, momentum=%.4f", 
+                        direction, strength, ema_separation if 'ema_separation' in dir() else 0, momentum)
+            
+            return direction, round(strength, 3)
+            
+        except Exception as exc:
+            logger.exception("Trend calculation failed: %s", exc)
+            return "NEUTRAL", 0.0
+
+
 def calculate_asian_range(candles_or_client, symbol: str | None = None) -> tuple[float, float] | None:
     """Return the low/high of the most recent Asian session in UTC.
 

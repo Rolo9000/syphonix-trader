@@ -20,7 +20,7 @@ except ImportError:  # pragma: no cover - platform dependent
     MT5_AVAILABLE = False
 import pandas as pd
 
-from core.indicators import calculate_atr, calculate_portfolio_weights
+from core.indicators import calculate_atr, calculate_portfolio_weights, calculate_trend_strength
 from core.models import TradeSignal
 from core.mt5_client import MT5Client
 from core.risk_manager import RiskManager
@@ -127,10 +127,14 @@ class BarbellStrategy:
             return {symbol: exposures[symbol] / total for symbol in self.symbols}
 
     def generate_rebalance_signals(self, client: MT5Client, risk_manager: RiskManager) -> List[TradeSignal]:
-        """Generate rebalancing trade signals when weights drift outside tolerance.
+        """Generate rebalancing trade signals with trend-weighted allocation.
         
-        Conservative implementation: 15% total allocation, 10% rebalance threshold, 
-        $50k position cap, tight stops (0.8x ATR), tight profits (1.0x ATR).
+        Hybrid approach inspired by competition leaders:
+        - Base allocation: 15% of equity across all assets
+        - Trend boost: Up to 2.5x weight for strongly trending assets
+        - Confidence-based sizing: 0.5x volume for neutral, 1.5x for strong trends
+        - Conservative stops (0.8x ATR) and tight profits (1.0x ATR)
+        - $50k position cap per trade
         """
         signals: List[TradeSignal] = []
         with _span("BarbellStrategy.generate_rebalance_signals"):
@@ -140,27 +144,72 @@ class BarbellStrategy:
                 return signals
 
             state = client.get_account_info()
-            allocation_amount = float(state.equity) * float(self.total_allocation_pct)
+            base_allocation = float(state.equity) * float(self.total_allocation_pct)
             current_exposures = self._current_notional(client)
             current_weights = self.get_current_weights(client)
 
+            # Step 1: Calculate trend strength for all symbols and compute dynamic weights
+            trend_data = {}
+            total_trend_score = 0.0
             for symbol in self.symbols:
                 try:
-                    target_weight = float(self.target_weights.get(symbol, 0.0))
+                    candles = client.get_candles(symbol, mt5.TIMEFRAME_H1, 30)
+                    direction, strength = calculate_trend_strength(candles)
+                    trend_data[symbol] = {"direction": direction, "strength": strength}
+                    # Trending assets get boosted weight (1.0 to 2.5x)
+                    if strength > 0.3:  # Only boost if trend is meaningful
+                        trend_score = 1.0 + (strength * 1.5)  # Max 2.5x at full strength
+                    else:
+                        trend_score = 1.0
+                    trend_data[symbol]["score"] = trend_score
+                    total_trend_score += trend_score * float(self.target_weights.get(symbol, 0.0))
+                except Exception:
+                    trend_data[symbol] = {"direction": "NEUTRAL", "strength": 0.0, "score": 1.0}
+                    total_trend_score += float(self.target_weights.get(symbol, 0.0))
+
+            # Step 2: Compute trend-adjusted allocation per symbol
+            for symbol in self.symbols:
+                try:
+                    base_weight = float(self.target_weights.get(symbol, 0.0))
+                    trend_score = trend_data[symbol]["score"]
+                    trend_direction = trend_data[symbol]["direction"]
+                    trend_strength = trend_data[symbol]["strength"]
+                    
+                    # Dynamic weight: boost trending assets proportionally
+                    if total_trend_score > 0:
+                        dynamic_weight = (base_weight * trend_score) / total_trend_score
+                    else:
+                        dynamic_weight = base_weight
+                    
                     actual_weight = float(current_weights.get(symbol, 0.0))
-                    drift = float(actual_weight - target_weight)
-                    if abs(drift) <= float(self.rebalance_threshold):
+                    drift = float(actual_weight - dynamic_weight)
+                    
+                    # Use tighter threshold for trending assets (want to be in trend quickly)
+                    effective_threshold = float(self.rebalance_threshold) * (1.0 - trend_strength * 0.5)
+                    if abs(drift) <= effective_threshold:
                         continue
 
                     current_price = float(client.get_current_price(symbol)[0])
-                    desired_notional = float(allocation_amount) * target_weight
+                    desired_notional = float(base_allocation) * dynamic_weight
                     current_notional = float(current_exposures.get(symbol, 0.0))
                     notional_diff = float(desired_notional - current_notional)
                     if abs(notional_diff) < float(current_price) * 0.0001:
                         continue
 
-                    action = "BUY" if notional_diff > 0 else "SELL"
+                    # Determine action - but only trade WITH the trend if trend is strong
+                    raw_action = "BUY" if notional_diff > 0 else "SELL"
+                    
+                    # Skip trades against strong trends (leader lesson: follow the trend)
+                    if trend_strength >= 0.5:
+                        if (trend_direction == "UP" and raw_action == "SELL") or \
+                           (trend_direction == "DOWN" and raw_action == "BUY"):
+                            logger.info("Skipping %s %s - against strong trend (%s, strength=%.2f)",
+                                       raw_action, symbol, trend_direction, trend_strength)
+                            continue
+                    
+                    action = raw_action
                     entry_price = float(current_price)
+                    
                     try:
                         candles = client.get_candles(symbol, mt5.TIMEFRAME_H1, 20)
                         atr = calculate_atr(candles)
@@ -179,7 +228,14 @@ class BarbellStrategy:
                         take_profit = float(entry_price - atr * 1.0)
 
                     stop_loss_pips = float(abs(entry_price - stop_loss) * (100.0 if symbol.endswith("JPY") else 10000.0))
-                    volume = float(risk_manager.calculate_position_size(symbol, stop_loss_pips, risk_manager.risk_per_trade))
+                    base_volume = float(risk_manager.calculate_position_size(symbol, stop_loss_pips, risk_manager.risk_per_trade))
+                    
+                    # Confidence-based sizing: scale volume by trend strength
+                    # - Neutral trend (0.0): 0.5x volume (conservative)
+                    # - Strong trend (1.0): 1.5x volume (leader-style conviction)
+                    confidence_multiplier = 0.5 + (trend_strength * 1.0)  # Range: 0.5 to 1.5
+                    volume = base_volume * confidence_multiplier
+                    
                     if volume <= 0.0:
                         continue
 
@@ -202,6 +258,12 @@ class BarbellStrategy:
                     if volume <= 0.0:
                         continue
 
+                    # Confidence: base 0.65 + trend_strength * 0.30 (range 0.65 to 0.95)
+                    signal_confidence = 0.65 + (trend_strength * 0.30)
+                    
+                    logger.info("Signal: %s %s vol=%.2f (trend=%s, strength=%.2f, conf=%.2f, dynamic_wt=%.2f)",
+                               action, symbol, volume, trend_direction, trend_strength, signal_confidence, dynamic_weight)
+
                     signals.append(
                         TradeSignal(
                             symbol=symbol,
@@ -211,7 +273,7 @@ class BarbellStrategy:
                             take_profit=take_profit,
                             volume=volume,
                             strategy_name="BarbellRebalance",
-                            confidence=0.75,
+                            confidence=signal_confidence,
                             timestamp=datetime.utcnow(),
                         )
                     )
