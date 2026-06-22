@@ -59,7 +59,7 @@ class BarbellStrategy:
         "SOLUSD": 0.10,
         "XRPUSD": 0.10,
     }
-    total_allocation_pct: float = 0.70
+    total_allocation_pct: float = 0.40
 
     def __init__(
         self,
@@ -174,7 +174,7 @@ class BarbellStrategy:
                         take_profit = float(entry_price - atr * 2.0)
 
                     stop_loss_pips = float(abs(entry_price - stop_loss) * (100.0 if symbol.endswith("JPY") else 10000.0))
-                    volume = float(risk_manager.calculate_position_size(symbol, stop_loss_pips, 0.05))
+                    volume = float(risk_manager.calculate_position_size(symbol, stop_loss_pips, risk_manager.risk_per_trade)) * 10
                     if volume <= 0.0:
                         continue
 

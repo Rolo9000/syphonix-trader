@@ -45,11 +45,6 @@ async def execute_trading_cycle(
     barbell: BarbellStrategy,
 ) -> None:
     with _span("main.execute_trading_cycle"):
-        # Detect market open (21:58 - 22:05 UTC) and wait for liquidity
-        now = datetime.utcnow()
-        if 21 <= now.hour and 58 <= now.minute or (22 <= now.hour and now.minute <= 5):
-            logger.info("Market open detected (21:58-22:05 UTC); waiting 60 seconds for liquidity")
-            await asyncio.sleep(60)
 
         if state_store.is_emergency_stop():
             logger.warning("Emergency stop is active; skipping trading cycle")
@@ -191,7 +186,7 @@ def build_scheduler(
     scheduler.add_job(
         lambda: loop.call_soon_threadsafe(asyncio.create_task, execute_trading_cycle(client, risk_manager, state_store, asian_breakout, barbell)),
         "interval",
-        minutes=5,
+        minutes=2,
         id="execute_trading_cycle",
         replace_existing=True,
     )

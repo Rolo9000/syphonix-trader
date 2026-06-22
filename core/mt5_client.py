@@ -111,7 +111,6 @@ class MT5Client:
             account_info = mt5.account_info()
             if account_info is None:
                 raise RuntimeError("Failed to retrieve MT5 account info")
-
             equity = float(account_info.equity)
             balance = float(account_info.balance)
             margin_used = float(getattr(account_info, "margin", 0.0))
@@ -125,21 +124,17 @@ class MT5Client:
             if positions:
                 for pos in positions:
                     try:
-                        tick = mt5.symbol_info_tick(pos.symbol)
-                        if tick is None:
-                            continue
                         symbol_info = mt5.symbol_info(pos.symbol)
-                        if symbol_info is None:
-                            continue
-                        price = tick.bid if pos.type == 0 else tick.ask
-                        contract_size = float(symbol_info.trade_contract_size)
-                        gross_notional += abs(pos.volume * price * contract_size)
+                        if symbol_info:
+                            contract_size = float(getattr(symbol_info, "trade_contract_size", 1.0))
+                            gross_notional += abs(pos.volume * pos.price_open * contract_size)
                     except Exception:
                         continue
-            
-            actual_leverage = gross_notional / equity if equity > 0 else 0.0
 
-            margin_usage_pct = (margin_used / equity * 100.0) if equity else 0.0
+            equity_safe = equity if equity > 0 else 1.0
+            actual_leverage = gross_notional / equity_safe
+
+            margin_usage_pct = (margin_used / equity_safe * 100.0) if equity_safe else 0.0
 
             return RiskState(
                 equity=equity,

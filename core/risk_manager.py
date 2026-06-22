@@ -164,6 +164,7 @@ class RiskManager:
         with _span("RiskManager.is_safe_to_trade"):
             try:
                 state = self.check_risk_state()
+                logger.info(f"Current actual leverage: {state.leverage_ratio:.2f}x, margin: {state.margin_usage_pct:.1f}%")
 
                 if state.margin_usage_pct > 85.0:
                     return False, f"Margin usage {state.margin_usage_pct:.1f}% exceeds 85%"
@@ -250,38 +251,48 @@ class RiskManager:
                 state = self.check_risk_state()
                 signal_notional = float(signal.volume) * float(signal.entry_price)
 
-                long_notional = sum(
+                # Current portfolio directional exposure (existing positions only)
+                current_long = sum(
                     p.volume * p.current_price
                     for p in state.active_positions
                     if p.volume > 0
                 )
-                short_notional = sum(
+                current_short = sum(
                     abs(p.volume) * p.current_price
                     for p in state.active_positions
                     if p.volume < 0
                 )
+                current_total = current_long + current_short
+                current_directional = 0.0
+                if current_total > 0:
+                    current_directional = abs(current_long - current_short) / current_total * 100.0
 
-                # Add signal to appropriate side
-                if signal.action.upper() == "BUY":
-                    long_notional += signal_notional
-                else:
-                    short_notional += signal_notional
-
-                total = long_notional + short_notional
-                if total <= 0:
+                # If already concentrated, allow signal through (we can't fix historic concentration)
+                if current_directional >= 95.0:
                     return True
 
-                net = abs(long_notional - short_notional)
-                directional_exposure = (net / total) * 100.0
+                # Otherwise, simulate adding the signal and block only if it would push over 95%
+                if signal.action.upper() == "BUY":
+                    new_long = current_long + signal_notional
+                    new_short = current_short
+                else:
+                    new_short = current_short + signal_notional
+                    new_long = current_long
 
-                if directional_exposure > 95.0:
+                new_total = new_long + new_short
+                if new_total <= 0:
+                    return True
+
+                new_directional = abs(new_long - new_short) / new_total * 100.0
+                if new_directional > 95.0:
                     logger.warning(
-                        "Directional exposure would exceed 95%%: %.1f%% (signal: %s %s)",
-                        directional_exposure,
+                        "Directional exposure would exceed 95%% after adding signal: %.1f%% (signal: %s %s)",
+                        new_directional,
                         signal.action,
                         signal.symbol,
                     )
                     return False
+
                 return True
             except Exception as exc:
                 logger.exception("Directional exposure check failed")
