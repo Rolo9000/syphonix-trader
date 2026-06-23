@@ -167,9 +167,9 @@ class RiskManager:
                 state = self.check_risk_state()
                 logger.info(f"Current actual leverage: {state.leverage_ratio:.2f}x, margin: {state.margin_usage_pct:.1f}%")
 
-                # Emergency equity protection: stop trading if equity drops below $800k
-                if state.equity < 800000.0:
-                    return False, f"Equity protection: below $800,000 threshold (current: ${state.equity:,.2f})"
+                # Emergency equity protection: stop trading if equity drops below $200k
+                if state.equity < 200000.0:
+                    return False, f"Equity protection: below $200,000 threshold (current: ${state.equity:,.2f})"
 
                 if state.margin_usage_pct > 85.0:
                     return False, f"Margin usage {state.margin_usage_pct:.1f}% exceeds 85%"
