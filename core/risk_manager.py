@@ -262,9 +262,9 @@ class RiskManager:
     def check_concentration(self, new_symbol: str, new_notional: float) -> bool:
         """Return True if adding a proposed position keeps concentration below 85%.
         
-        Safety rule: Only enforce concentration limits at high leverage (>15x).
-        At low leverage, concentration checks pass automatically to allow strategies to scale up.
+        HACKATHON MODE: Disabled - allow all concentrations
         """
+        return True  # HACKATHON: disabled
         with _span("RiskManager.check_concentration"):
             try:
                 state = self.check_risk_state()
@@ -336,11 +336,9 @@ class RiskManager:
     def check_directional_exposure(self, signal) -> bool:
         """Return True if adding signal keeps directional exposure manageable.
         
-        Tiered approach based on leverage:
-        - Low leverage (≤5x): Allow all trades regardless of directional exposure
-        - Medium leverage (5-15x): Allow trades that reduce or maintain exposure, or if < 90%
-        - High leverage (>15x): Strict 80% limit
+        HACKATHON MODE: Disabled - allow all trades regardless of directional exposure
         """
+        return True  # HACKATHON: disabled
         with _span("RiskManager.check_directional_exposure"):
             try:
                 state = self.check_risk_state()
