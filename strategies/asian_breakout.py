@@ -66,6 +66,10 @@ class AsianBreakoutStrategy:
     risk_per_trade: float = 0.010  # Increased from 0.005 (2x position sizing)
     atr_period: int = 14
     atr_stop_mult: float = 0.3
+    
+    # Cooldown tracking to prevent overtrading
+    _last_trade_time: dict = {}
+    COOLDOWN_MINUTES: int = 15
 
     def __init__(
         self,
@@ -113,6 +117,15 @@ class AsianBreakoutStrategy:
                     if symbol in open_positions:
                         logger.debug("Skipping %s - already have open position", symbol)
                         continue
+                    
+                    # COOLDOWN CHECK: Don't re-trade same symbol too quickly
+                    from datetime import datetime
+                    if symbol in AsianBreakoutStrategy._last_trade_time:
+                        minutes_since = (datetime.utcnow() - AsianBreakoutStrategy._last_trade_time[symbol]).total_seconds() / 60.0
+                        if minutes_since < self.COOLDOWN_MINUTES:
+                            logger.debug("Skipping %s - cooldown active (%.1f mins remaining)", 
+                                        symbol, self.COOLDOWN_MINUTES - minutes_since)
+                            continue
                     
                     session_range = calculate_asian_range(client, symbol)
                     if session_range is None:
@@ -230,6 +243,8 @@ class AsianBreakoutStrategy:
                                 timestamp=datetime.utcnow(),
                             )
                         )
+                        # Update cooldown timer
+                        AsianBreakoutStrategy._last_trade_time[symbol] = datetime.utcnow()
                     # Only take bearish breakout if trend is DOWN or NEUTRAL (not against UP trend)
                     elif bearish_sweep and market_structure == "BEARISH_MSS":
                         if trend_direction == "UP" and trend_strength >= 0.5:
@@ -301,6 +316,8 @@ class AsianBreakoutStrategy:
                                 timestamp=datetime.utcnow(),
                             )
                         )
+                        # Update cooldown timer
+                        AsianBreakoutStrategy._last_trade_time[symbol] = datetime.utcnow()
                 except Exception:
                     logger.exception("Failed to generate signal for %s", symbol)
                     continue

@@ -64,6 +64,10 @@ class BarbellStrategy:
         "XRPUSD": 0.10,
     }
     total_allocation_pct: float = 0.35  # Increased from 0.25 (40% more capital)
+    
+    # Cooldown tracking to prevent overtrading
+    _last_trade_time: Dict[str, datetime] = {}
+    COOLDOWN_MINUTES: int = 15  # Don't re-trade same symbol for 15 mins
 
     def __init__(
         self,
@@ -228,6 +232,14 @@ class BarbellStrategy:
                         logger.debug("Skipping %s %s - already have %s position", raw_action, symbol, raw_action)
                         continue
                     
+                    # COOLDOWN CHECK: Don't re-trade same symbol too quickly
+                    if symbol in BarbellStrategy._last_trade_time:
+                        minutes_since = (datetime.utcnow() - BarbellStrategy._last_trade_time[symbol]).total_seconds() / 60.0
+                        if minutes_since < self.COOLDOWN_MINUTES:
+                            logger.debug("Skipping %s - cooldown active (%.1f mins remaining)", 
+                                        symbol, self.COOLDOWN_MINUTES - minutes_since)
+                            continue
+                    
                     # RAPID MOVEMENT FILTER: Don't buy into falling knife, don't sell into rally
                     if raw_action == "BUY" and trend_data[symbol].get("declining", False):
                         logger.info("Skipping BUY %s - rapid decline detected (price dropping fast)", symbol)
@@ -236,13 +248,31 @@ class BarbellStrategy:
                         logger.info("Skipping SELL %s - rapid rally detected (price rising fast)", symbol)
                         continue
                     
-                    # Skip trades against trends (stricter threshold: 0.5 instead of 0.3)
-                    if trend_strength >= 0.5:
+                    # Skip trades against trends (even stricter: 0.4 threshold)
+                    if trend_strength >= 0.4:
                         if (trend_direction == "UP" and raw_action == "SELL") or \
                            (trend_direction == "DOWN" and raw_action == "BUY"):
                             logger.info("Skipping %s %s - against trend (%s, strength=%.2f)",
                                        raw_action, symbol, trend_direction, trend_strength)
                             continue
+                    
+                    # PULLBACK FILTER: Don't chase - wait for price to pull back before entering
+                    candles = client.get_candles(symbol, mt5.TIMEFRAME_M15, 10)
+                    if len(candles) >= 5:
+                        recent_high = float(candles["high"].iloc[-5:].max())
+                        recent_low = float(candles["low"].iloc[-5:].min())
+                        if raw_action == "BUY":
+                            # Don't buy if current price is within 0.1% of recent high
+                            if current_price > recent_high * 0.999:
+                                logger.info("Skipping BUY %s - price %.5f too close to recent high %.5f", 
+                                           symbol, current_price, recent_high)
+                                continue
+                        else:  # SELL
+                            # Don't sell if current price is within 0.1% of recent low
+                            if current_price < recent_low * 1.001:
+                                logger.info("Skipping SELL %s - price %.5f too close to recent low %.5f", 
+                                           symbol, current_price, recent_low)
+                                continue
                     
                     action = raw_action
                     entry_price = float(current_price)
@@ -352,6 +382,8 @@ class BarbellStrategy:
                             timestamp=datetime.utcnow(),
                         )
                     )
+                    # Update cooldown timer
+                    BarbellStrategy._last_trade_time[symbol] = datetime.utcnow()
                 except Exception:
                     logger.exception("Failed to generate rebalance signal for %s", symbol)
                     continue
