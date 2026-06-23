@@ -172,7 +172,7 @@ class AsianBreakoutStrategy:
                         entry = current_close
                         atr_value = calculate_atr(candles, self.atr_period)
                         stop_loss = current_low - atr_value * 0.5
-                        take_profit = entry + range_width * 1.2  # Let winners run (was 0.6x)
+                        take_profit = entry + range_width * 0.8  # Tighter TP, trailing handles big moves
                         
                         # SANITY CHECK: TP must be above entry for BUY
                         if take_profit <= entry:
@@ -243,7 +243,7 @@ class AsianBreakoutStrategy:
                         entry = current_close
                         atr_value = calculate_atr(candles, self.atr_period)
                         stop_loss = current_high + atr_value * 0.5
-                        take_profit = entry - range_width * 1.2  # Let winners run (was 0.6x)
+                        take_profit = entry - range_width * 0.8  # Tighter TP, trailing handles big moves
                         
                         # SANITY CHECK: TP must be below entry for SELL
                         if take_profit >= entry:

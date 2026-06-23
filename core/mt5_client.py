@@ -385,6 +385,89 @@ class MT5Client:
             results.append(self.close_position(position.ticket))
         return results
 
+    def modify_position(self, ticket: int, stop_loss: float | None = None, take_profit: float | None = None) -> OrderResult:
+        """Modify the stop loss and/or take profit of an existing position."""
+        if not MT5_AVAILABLE:
+            raise RuntimeError("MetaTrader5 not available on this platform")
+
+        try:
+            self._ensure_connected()
+            
+            # Get the position
+            position = mt5.positions_get(ticket=ticket)
+            if position is None or len(position) == 0:
+                return OrderResult(
+                    success=False,
+                    ticket=ticket,
+                    error_code=-1,
+                    error_msg=f"Position {ticket} not found",
+                    symbol="",
+                    volume=0.0,
+                    price=0.0,
+                )
+            
+            pos = position[0]
+            symbol = pos.symbol
+            current_sl = float(pos.sl) if pos.sl else 0.0
+            current_tp = float(pos.tp) if pos.tp else 0.0
+            
+            # Use current values if not specified
+            new_sl = float(stop_loss) if stop_loss is not None else current_sl
+            new_tp = float(take_profit) if take_profit is not None else current_tp
+            
+            request = {
+                "action": mt5.TRADE_ACTION_SLTP,
+                "position": ticket,
+                "symbol": symbol,
+                "sl": new_sl,
+                "tp": new_tp,
+            }
+            
+            result = mt5.order_send(request)
+            if result is None:
+                return OrderResult(
+                    success=False,
+                    ticket=ticket,
+                    error_code=-1,
+                    error_msg="MT5 order_send returned None",
+                    symbol=symbol,
+                    volume=pos.volume,
+                    price=pos.price_open,
+                )
+            
+            if result.retcode == mt5.TRADE_RETCODE_DONE:
+                logger.info("Modified position %d: SL=%.5f, TP=%.5f", ticket, new_sl, new_tp)
+                return OrderResult(
+                    success=True,
+                    ticket=ticket,
+                    error_code=result.retcode,
+                    error_msg="",
+                    symbol=symbol,
+                    volume=pos.volume,
+                    price=pos.price_open,
+                )
+            else:
+                return OrderResult(
+                    success=False,
+                    ticket=ticket,
+                    error_code=result.retcode,
+                    error_msg=result.comment if hasattr(result, 'comment') else str(result.retcode),
+                    symbol=symbol,
+                    volume=pos.volume,
+                    price=pos.price_open,
+                )
+        except Exception as exc:
+            logger.exception("Failed to modify position %d", ticket)
+            return OrderResult(
+                success=False,
+                ticket=ticket,
+                error_code=-1,
+                error_msg=str(exc),
+                symbol="",
+                volume=0.0,
+                price=0.0,
+            )
+
     def get_open_positions(self) -> List[Position]:
         """Return active open positions from the broker."""
         if not MT5_AVAILABLE:

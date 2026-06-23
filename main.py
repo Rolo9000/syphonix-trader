@@ -17,11 +17,18 @@ from dotenv import load_dotenv
 
 from agents.sentiment_agent import SentimentAgent
 from core import MT5Client
-from core.indicators import is_news_blackout
+from core.indicators import is_news_blackout, calculate_atr
 from core.risk_manager import RiskManager
 from infra.state_store import StateStore
 from strategies.asian_breakout import AsianBreakoutStrategy
 from strategies.barbell import BarbellStrategy
+
+try:
+    import MetaTrader5 as mt5
+    MT5_AVAILABLE = True
+except ImportError:
+    mt5 = None
+    MT5_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +42,68 @@ def _span(name: str):
     except ImportError:
         pass
     return asyncio.nullcontext()
+
+
+async def trailing_stop_manager(client: MT5Client) -> None:
+    """Trail stop losses on profitable positions to lock in gains.
+    
+    Strategy:
+    - Activation: Position must be 0.3% in profit before trailing starts
+    - Trail distance: 0.2% behind current price (tighter than original SL)
+    - Only trails in profit direction (SL never moves against you)
+    """
+    with _span("main.trailing_stop_manager"):
+        try:
+            positions = client.get_open_positions()
+            if not positions:
+                return
+            
+            for pos in positions:
+                try:
+                    current_price = pos.current_price
+                    entry_price = pos.open_price
+                    current_sl = pos.stop_loss
+                    
+                    if current_price <= 0 or entry_price <= 0:
+                        continue
+                    
+                    # Calculate profit percentage
+                    if pos.order_type == "BUY":
+                        profit_pct = (current_price - entry_price) / entry_price
+                    else:  # SELL
+                        profit_pct = (entry_price - current_price) / entry_price
+                    
+                    # Only trail if we're at least 0.3% in profit (activation threshold)
+                    if profit_pct < 0.003:
+                        continue
+                    
+                    # Calculate new stop loss - 0.2% behind current price
+                    trail_distance = current_price * 0.002
+                    
+                    if pos.order_type == "BUY":
+                        new_sl = current_price - trail_distance
+                        # Only move SL up, never down
+                        if new_sl > current_sl:
+                            logger.info(
+                                "Trailing BUY %s #%d: SL %.5f -> %.5f (profit %.2f%%)",
+                                pos.symbol, pos.ticket, current_sl, new_sl, profit_pct * 100
+                            )
+                            client.modify_position(pos.ticket, stop_loss=new_sl)
+                    else:  # SELL
+                        new_sl = current_price + trail_distance
+                        # Only move SL down, never up
+                        if current_sl == 0 or new_sl < current_sl:
+                            logger.info(
+                                "Trailing SELL %s #%d: SL %.5f -> %.5f (profit %.2f%%)",
+                                pos.symbol, pos.ticket, current_sl, new_sl, profit_pct * 100
+                            )
+                            client.modify_position(pos.ticket, stop_loss=new_sl)
+                            
+                except Exception as exc:
+                    logger.warning("Failed to trail position %d: %s", pos.ticket, exc)
+                    
+        except Exception:
+            logger.exception("Trailing stop manager failed")
 
 
 async def execute_trading_cycle(
@@ -210,6 +279,15 @@ def build_scheduler(
         "interval",
         minutes=1,
         id="risk_monitor",
+        replace_existing=True,
+    )
+    
+    # Trail stops every 30 seconds to lock in profits
+    scheduler.add_job(
+        lambda: loop.call_soon_threadsafe(asyncio.create_task, trailing_stop_manager(client)),
+        "interval",
+        seconds=30,
+        id="trailing_stop_manager",
         replace_existing=True,
     )
 

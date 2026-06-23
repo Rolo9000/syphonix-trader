@@ -256,13 +256,13 @@ class BarbellStrategy:
                         logger.warning("ATR calculation failed for %s, using fallback volatility", symbol)
                         atr = float(entry_price) * 0.01
 
-                    # Wider profits to capture larger moves: 1.5x ATR TP, 1.0x ATR SL (1.5:1 R:R)
+                    # Balanced R:R with trailing stops: 1.0x ATR both ways, trailing locks bigger wins
                     if action == "BUY":
                         stop_loss = float(entry_price - atr * 1.0)
-                        take_profit = float(entry_price + atr * 1.5)
+                        take_profit = float(entry_price + atr * 1.0)
                     else:
                         stop_loss = float(entry_price + atr * 1.0)
-                        take_profit = float(entry_price - atr * 1.5)
+                        take_profit = float(entry_price - atr * 1.0)
                     
                     # SANITY CHECK: TP must be profitable
                     if action == "BUY" and take_profit <= entry_price:
