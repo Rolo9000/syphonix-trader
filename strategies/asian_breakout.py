@@ -184,7 +184,7 @@ class AsianBreakoutStrategy:
                         
                         entry = current_close
                         atr_value = calculate_atr(candles, self.atr_period)
-                        stop_loss = current_low - atr_value * 0.5
+                        stop_loss = current_low - atr_value * 0.3  # Tighter SL
                         take_profit = entry + range_width * 0.8  # Tighter TP, trailing handles big moves
                         
                         # SANITY CHECK: TP must be above entry for BUY
@@ -203,6 +203,21 @@ class AsianBreakoutStrategy:
                         
                         # Scale volume by trend confirmation (0.5x if neutral, 1.5x if trend confirms)
                         base_volume = risk_manager.calculate_position_size(symbol, stop_loss_pips, self.risk_per_trade)
+                        
+                        # CAP MAX DOLLAR RISK: Limit to $100 max loss per trade
+                        max_risk_dollars = 100.0
+                        try:
+                            tick = mt5.symbol_info_tick(symbol)
+                            symbol_info = mt5.symbol_info(symbol)
+                            if tick and symbol_info:
+                                pip_value = symbol_info.trade_tick_value / symbol_info.trade_tick_size
+                                dollar_risk = base_volume * stop_loss_pips * pip_value / 10000.0
+                                if dollar_risk > max_risk_dollars:
+                                    base_volume = base_volume * (max_risk_dollars / dollar_risk)
+                                    logger.info("Capping %s volume to limit risk to $%.0f", symbol, max_risk_dollars)
+                        except Exception:
+                            pass
+                        
                         if trend_direction == "UP":
                             volume = base_volume * (0.5 + trend_strength * 1.0)  # 0.5x to 1.5x
                             signal_confidence = 0.70 + (trend_strength * 0.25)
@@ -257,7 +272,7 @@ class AsianBreakoutStrategy:
                         
                         entry = current_close
                         atr_value = calculate_atr(candles, self.atr_period)
-                        stop_loss = current_high + atr_value * 0.5
+                        stop_loss = current_high + atr_value * 0.3  # Tighter SL
                         take_profit = entry - range_width * 0.8  # Tighter TP, trailing handles big moves
                         
                         # SANITY CHECK: TP must be below entry for SELL
@@ -276,6 +291,21 @@ class AsianBreakoutStrategy:
                         
                         # Scale volume by trend confirmation
                         base_volume = risk_manager.calculate_position_size(symbol, stop_loss_pips, self.risk_per_trade)
+                        
+                        # CAP MAX DOLLAR RISK: Limit to $100 max loss per trade
+                        max_risk_dollars = 100.0
+                        try:
+                            tick = mt5.symbol_info_tick(symbol)
+                            symbol_info = mt5.symbol_info(symbol)
+                            if tick and symbol_info:
+                                pip_value = symbol_info.trade_tick_value / symbol_info.trade_tick_size
+                                dollar_risk = base_volume * stop_loss_pips * pip_value / 10000.0
+                                if dollar_risk > max_risk_dollars:
+                                    base_volume = base_volume * (max_risk_dollars / dollar_risk)
+                                    logger.info("Capping %s volume to limit risk to $%.0f", symbol, max_risk_dollars)
+                        except Exception:
+                            pass
+                        
                         if trend_direction == "DOWN":
                             volume = base_volume * (0.5 + trend_strength * 1.0)  # 0.5x to 1.5x
                             signal_confidence = 0.70 + (trend_strength * 0.25)

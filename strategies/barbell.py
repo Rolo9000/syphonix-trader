@@ -286,12 +286,12 @@ class BarbellStrategy:
                         logger.warning("ATR calculation failed for %s, using fallback volatility", symbol)
                         atr = float(entry_price) * 0.01
 
-                    # Balanced R:R with trailing stops: 1.0x ATR both ways, trailing locks bigger wins
+                    # Tighter stops for better R:R: 0.5x ATR SL, 1.0x ATR TP (2:1 R:R)
                     if action == "BUY":
-                        stop_loss = float(entry_price - atr * 1.0)
+                        stop_loss = float(entry_price - atr * 0.5)
                         take_profit = float(entry_price + atr * 1.0)
                     else:
-                        stop_loss = float(entry_price + atr * 1.0)
+                        stop_loss = float(entry_price + atr * 0.5)
                         take_profit = float(entry_price - atr * 1.0)
                     
                     # SANITY CHECK: TP must be profitable
@@ -311,6 +311,20 @@ class BarbellStrategy:
 
                     stop_loss_pips = float(abs(entry_price - stop_loss) * (100.0 if symbol.endswith("JPY") else 10000.0))
                     base_volume = float(risk_manager.calculate_position_size(symbol, stop_loss_pips, risk_manager.risk_per_trade))
+                    
+                    # CAP MAX DOLLAR RISK: Limit to $100 max loss per trade
+                    max_risk_dollars = 100.0
+                    try:
+                        tick = mt5.symbol_info_tick(symbol)
+                        symbol_info = mt5.symbol_info(symbol)
+                        if tick and symbol_info:
+                            pip_value = symbol_info.trade_tick_value / symbol_info.trade_tick_size
+                            dollar_risk = base_volume * stop_loss_pips * pip_value / 10000.0
+                            if dollar_risk > max_risk_dollars:
+                                base_volume = base_volume * (max_risk_dollars / dollar_risk)
+                                logger.info("Capping %s volume to limit risk to $%.0f", symbol, max_risk_dollars)
+                    except Exception:
+                        pass
                     
                     # Confidence-based sizing: scale volume by trend strength
                     # - Neutral trend (0.0): 0.5x volume (conservative)
