@@ -174,8 +174,13 @@ class AsianBreakoutStrategy:
                     
                     # Only take bullish breakout if trend is UP or NEUTRAL (not against DOWN trend)
                     if bullish_sweep and market_structure == "BULLISH_MSS":
-                        if trend_direction == "DOWN" and trend_strength >= 0.5:
-                            logger.info("Skipping bullish breakout on %s - against DOWN trend (strength=%.2f)", symbol, trend_strength)
+                        # WIN RATE FILTER: Skip weak/choppy markets
+                        if trend_strength < 0.2:
+                            logger.info("Skipping bullish breakout on %s - trend too weak (strength=%.2f)", symbol, trend_strength)
+                            continue
+                        # WIN RATE FILTER: NEVER trade against trend
+                        if trend_direction == "DOWN":
+                            logger.info("Skipping bullish breakout on %s - against DOWN trend", symbol)
                             continue
                         # Don't buy into falling knife
                         if declining:
@@ -218,14 +223,11 @@ class AsianBreakoutStrategy:
                         except Exception:
                             pass
                         
-                        if trend_direction == "UP":
-                            volume = base_volume * (0.5 + trend_strength * 1.0)  # 0.5x to 1.5x
-                            signal_confidence = 0.70 + (trend_strength * 0.25)
-                        else:
-                            volume = base_volume * 0.5  # Reduced size without trend confirmation
-                            signal_confidence = 0.65
+                        # Volume scaling by trend strength
+                        volume = base_volume * (0.5 + trend_strength * 1.0)  # 0.5x to 1.5x
+                        signal_confidence = 0.70 + (trend_strength * 0.25)
                         
-                        # Sentiment boost: +30% when sentiment aligns with BUY
+                        # WIN RATE FILTER: SKIP if sentiment opposes (not just reduce)
                         if state_store is not None:
                             try:
                                 sentiment_result = state_store.get_sentiment(symbol)
@@ -235,8 +237,8 @@ class AsianBreakoutStrategy:
                                         volume = volume * 1.30
                                         logger.info("%s BULLISH sentiment aligns with BUY - boosting volume 30%%", symbol)
                                     elif sentiment == "BEARISH":
-                                        volume = volume * 0.70
-                                        logger.info("%s BEARISH sentiment opposes BUY - reducing volume 30%%", symbol)
+                                        logger.info("%s BEARISH sentiment opposes BUY - SKIPPING trade", symbol)
+                                        continue
                             except Exception:
                                 pass
                         
@@ -262,8 +264,13 @@ class AsianBreakoutStrategy:
                         AsianBreakoutStrategy._last_trade_time[symbol] = datetime.utcnow()
                     # Only take bearish breakout if trend is DOWN or NEUTRAL (not against UP trend)
                     elif bearish_sweep and market_structure == "BEARISH_MSS":
-                        if trend_direction == "UP" and trend_strength >= 0.5:
-                            logger.info("Skipping bearish breakout on %s - against UP trend (strength=%.2f)", symbol, trend_strength)
+                        # WIN RATE FILTER: Skip weak/choppy markets
+                        if trend_strength < 0.2:
+                            logger.info("Skipping bearish breakout on %s - trend too weak (strength=%.2f)", symbol, trend_strength)
+                            continue
+                        # WIN RATE FILTER: NEVER trade against trend
+                        if trend_direction == "UP":
+                            logger.info("Skipping bearish breakout on %s - against UP trend", symbol)
                             continue
                         # Don't sell into rallying market
                         if rallying:
@@ -306,14 +313,11 @@ class AsianBreakoutStrategy:
                         except Exception:
                             pass
                         
-                        if trend_direction == "DOWN":
-                            volume = base_volume * (0.5 + trend_strength * 1.0)  # 0.5x to 1.5x
-                            signal_confidence = 0.70 + (trend_strength * 0.25)
-                        else:
-                            volume = base_volume * 0.5  # Reduced size without trend confirmation
-                            signal_confidence = 0.65
+                        # Volume scaling by trend strength
+                        volume = base_volume * (0.5 + trend_strength * 1.0)  # 0.5x to 1.5x
+                        signal_confidence = 0.70 + (trend_strength * 0.25)
                         
-                        # Sentiment boost: +30% when sentiment aligns with SELL
+                        # WIN RATE FILTER: SKIP if sentiment opposes (not just reduce)
                         if state_store is not None:
                             try:
                                 sentiment_result = state_store.get_sentiment(symbol)
@@ -323,8 +327,8 @@ class AsianBreakoutStrategy:
                                         volume = volume * 1.30
                                         logger.info("%s BEARISH sentiment aligns with SELL - boosting volume 30%%", symbol)
                                     elif sentiment == "BULLISH":
-                                        volume = volume * 0.70
-                                        logger.info("%s BULLISH sentiment opposes SELL - reducing volume 30%%", symbol)
+                                        logger.info("%s BULLISH sentiment opposes SELL - SKIPPING trade", symbol)
+                                        continue
                             except Exception:
                                 pass
                         

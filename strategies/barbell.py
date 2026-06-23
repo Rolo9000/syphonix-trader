@@ -248,13 +248,18 @@ class BarbellStrategy:
                         logger.info("Skipping SELL %s - rapid rally detected (price rising fast)", symbol)
                         continue
                     
-                    # Skip trades against trends (even stricter: 0.4 threshold)
-                    if trend_strength >= 0.4:
-                        if (trend_direction == "UP" and raw_action == "SELL") or \
-                           (trend_direction == "DOWN" and raw_action == "BUY"):
-                            logger.info("Skipping %s %s - against trend (%s, strength=%.2f)",
-                                       raw_action, symbol, trend_direction, trend_strength)
-                            continue
+                    # WIN RATE FILTER 1: Skip choppy/weak markets - need minimum trend strength
+                    if trend_strength < 0.25:
+                        logger.info("Skipping %s %s - trend too weak (strength=%.2f < 0.25)",
+                                   raw_action, symbol, trend_strength)
+                        continue
+                    
+                    # WIN RATE FILTER 2: NEVER trade against the trend
+                    if (trend_direction == "UP" and raw_action == "SELL") or \
+                       (trend_direction == "DOWN" and raw_action == "BUY"):
+                        logger.info("Skipping %s %s - against trend (%s)",
+                                   raw_action, symbol, trend_direction)
+                        continue
                     
                     # PULLBACK FILTER: Don't chase - wait for price to pull back before entering
                     candles = client.get_candles(symbol, mt5.TIMEFRAME_M15, 10)
@@ -345,12 +350,12 @@ class BarbellStrategy:
                                     sentiment_boost = 1.30  # +30% volume
                                     logger.info("%s sentiment %s aligns with %s - boosting volume 30%%",
                                                symbol, sentiment, action)
-                                # Reduce if sentiment opposes action
+                                # WIN RATE FILTER 3: SKIP if sentiment opposes action (don't just reduce)
                                 elif (sentiment == "BULLISH" and action == "SELL") or \
                                      (sentiment == "BEARISH" and action == "BUY"):
-                                    sentiment_boost = 0.70  # -30% volume
-                                    logger.info("%s sentiment %s opposes %s - reducing volume 30%%",
+                                    logger.info("%s sentiment %s opposes %s - SKIPPING trade",
                                                symbol, sentiment, action)
+                                    continue
                         except Exception:
                             pass  # Sentiment unavailable, use default
                     volume = volume * sentiment_boost
