@@ -73,12 +73,12 @@ async def trailing_stop_manager(client: MT5Client) -> None:
                     else:  # SELL
                         profit_pct = (entry_price - current_price) / entry_price
                     
-                    # Only trail if we're at least 0.3% in profit (activation threshold)
-                    if profit_pct < 0.003:
+                    # Only trail if we're at least 0.6% in profit (let winners run!)
+                    if profit_pct < 0.006:
                         continue
                     
-                    # Calculate new stop loss - 0.2% behind current price
-                    trail_distance = current_price * 0.002
+                    # Calculate new stop loss - 0.4% behind current price
+                    trail_distance = current_price * 0.004
                     
                     if pos.order_type == "BUY":
                         new_sl = current_price - trail_distance

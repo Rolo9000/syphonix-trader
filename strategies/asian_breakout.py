@@ -204,8 +204,8 @@ class AsianBreakoutStrategy:
                         # Scale volume by trend confirmation (0.5x if neutral, 1.5x if trend confirms)
                         base_volume = risk_manager.calculate_position_size(symbol, stop_loss_pips, self.risk_per_trade)
                         
-                        # CAP MAX DOLLAR RISK: Limit to $100 max loss per trade
-                        max_risk_dollars = 100.0
+                        # CAP MAX DOLLAR RISK: Limit to $50 max loss per trade
+                        max_risk_dollars = 50.0
                         try:
                             tick = mt5.symbol_info_tick(symbol)
                             symbol_info = mt5.symbol_info(symbol)
@@ -293,7 +293,7 @@ class AsianBreakoutStrategy:
                         base_volume = risk_manager.calculate_position_size(symbol, stop_loss_pips, self.risk_per_trade)
                         
                         # CAP MAX DOLLAR RISK: Limit to $100 max loss per trade
-                        max_risk_dollars = 100.0
+                        max_risk_dollars = 50.0
                         try:
                             tick = mt5.symbol_info_tick(symbol)
                             symbol_info = mt5.symbol_info(symbol)
