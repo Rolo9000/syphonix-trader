@@ -47,10 +47,10 @@ def _span(name: str):
 async def trailing_stop_manager(client: MT5Client) -> None:
     """Trail stop losses on profitable positions to lock in gains.
     
-    Strategy:
-    - Activation: Position must be 0.3% in profit before trailing starts
-    - Trail distance: 0.2% behind current price (tighter than original SL)
-    - Only trails in profit direction (SL never moves against you)
+    NUCLEAR Strategy - Lock in profits FAST:
+    - Activation: 0.15% profit (activate early!)
+    - Trail distance: 0.1% behind current price (tight trail!)
+    - This catches those $2000 profits before they reverse
     """
     with _span("main.trailing_stop_manager"):
         try:
@@ -73,12 +73,12 @@ async def trailing_stop_manager(client: MT5Client) -> None:
                     else:  # SELL
                         profit_pct = (entry_price - current_price) / entry_price
                     
-                    # Only trail if we're at least 0.6% in profit (let winners run!)
-                    if profit_pct < 0.006:
+                    # NUCLEAR: Activate trailing EARLY at 0.15% profit
+                    if profit_pct < 0.0015:
                         continue
                     
-                    # Calculate new stop loss - 0.4% behind current price
-                    trail_distance = current_price * 0.004
+                    # NUCLEAR: Trail TIGHT - only 0.1% behind current price
+                    trail_distance = current_price * 0.001
                     
                     if pos.order_type == "BUY":
                         new_sl = current_price - trail_distance
@@ -307,11 +307,11 @@ def build_scheduler(
         replace_existing=True,
     )
     
-    # Trail stops every 30 seconds to lock in profits
+    # NUCLEAR: Trail stops every 10 seconds to catch profits before reversal
     scheduler.add_job(
         lambda: loop.call_soon_threadsafe(asyncio.create_task, trailing_stop_manager(client)),
         "interval",
-        seconds=30,
+        seconds=10,
         id="trailing_stop_manager",
         replace_existing=True,
     )
