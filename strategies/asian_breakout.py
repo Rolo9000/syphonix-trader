@@ -69,7 +69,7 @@ class AsianBreakoutStrategy:
     
     # Cooldown tracking to prevent overtrading
     _last_trade_time: dict = {}
-    COOLDOWN_MINUTES: int = 10  # PATIENT HAIL MARY: Wait for high-quality setups
+    COOLDOWN_MINUTES: int = 5  # 5 min cooldown - balanced
 
     def __init__(
         self,
@@ -144,13 +144,13 @@ class AsianBreakoutStrategy:
                         logger.debug("No M5 candles for %s", symbol)
                         continue
 
-                    # Get M1 candles for INSTANT trend detection
+                    # Get M15 candles for STABLE trend detection
                     try:
-                        m1_candles = client.get_candles(symbol, mt5.TIMEFRAME_M1, 30)
-                        trend_direction, trend_strength = calculate_trend_strength(m1_candles)
+                        m15_candles = client.get_candles(symbol, mt5.TIMEFRAME_M15, 30)
+                        trend_direction, trend_strength = calculate_trend_strength(m15_candles)
                         # Check rapid price movement
-                        declining = is_rapid_decline(m1_candles, threshold=0.002, bars=3)
-                        rallying = is_rapid_rally(m1_candles, threshold=0.002, bars=3)
+                        declining = is_rapid_decline(m15_candles, threshold=0.003, bars=4)
+                        rallying = is_rapid_rally(m15_candles, threshold=0.003, bars=4)
                     except Exception:
                         trend_direction, trend_strength = "NEUTRAL", 0.0
                         declining, rallying = False, False
@@ -172,9 +172,9 @@ class AsianBreakoutStrategy:
                     bid, ask = client.get_current_price(symbol)
                     spread = float(ask - bid)
                     
-                    # PATIENT HAIL MARY: Only trade STRONG trends (0.7+)
-                    if trend_strength < 0.7:
-                        logger.info("Skipping %s - trend strength %.2f < 0.7 (waiting for conviction)", symbol, trend_strength)
+                    # Trade with ANY clear trend (removed strict filter)
+                    if trend_strength < 0.3:
+                        logger.info("Skipping %s - trend strength %.2f < 0.3 (no clear trend)", symbol, trend_strength)
                         continue
                     
                     # Take breakouts WITH momentum, skip if against

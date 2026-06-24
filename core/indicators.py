@@ -111,57 +111,56 @@ def is_rapid_rally(df: pd.DataFrame, threshold: float = 0.003, bars: int = 4) ->
 
 
 def calculate_trend_strength(df: pd.DataFrame, fast_period: int = 5, slow_period: int = 13) -> tuple[str, float]:
-    """Calculate trend direction using INSTANT MOMENTUM (2 bars only).
+    """Calculate trend direction using STABLE EMA crossover.
     
     Returns:
         tuple: (direction, strength) where:
             - direction: "UP", "DOWN", or "NEUTRAL"
             - strength: 0.0 to 1.0 (0 = no trend, 1 = strong trend)
     
-    NUCLEAR Strategy:
-        - INSTANT: Just look at last 2 closes - if going up, UP. If going down, DOWN.
-        - No confirmation needed - we want SPEED over accuracy
-        - On M1 timeframe this means we react within seconds
+    Strategy: Classic EMA crossover - proven and stable
+        - Fast EMA (5) above Slow EMA (13) = UP
+        - Fast EMA (5) below Slow EMA (13) = DOWN
+        - Strength = separation normalized by ATR
     """
     with _span("calculate_trend_strength"):
         try:
-            if len(df) < 5:
+            if len(df) < slow_period + 5:
                 return "NEUTRAL", 0.0
             
             close = df["close"].astype(float)
-            current_price = float(close.iloc[-1])
-            prev_price = float(close.iloc[-2])
-            prev2_price = float(close.iloc[-3])
             
-            # INSTANT: Just compare last 2 prices
-            instant_change = (current_price - prev_price) / prev_price if prev_price != 0 else 0.0
-            prev_change = (prev_price - prev2_price) / prev2_price if prev2_price != 0 else 0.0
+            # Classic EMA crossover
+            ema_fast = close.ewm(span=fast_period, adjust=False).mean()
+            ema_slow = close.ewm(span=slow_period, adjust=False).mean()
             
-            # ULTRA-SIMPLE: If price went up in last bar, UP. If down, DOWN.
-            # Threshold of 0.0001 = 0.01% (very sensitive)
-            if instant_change > 0.0001:
+            fast_now = float(ema_fast.iloc[-1])
+            slow_now = float(ema_slow.iloc[-1])
+            fast_prev = float(ema_fast.iloc[-2])
+            slow_prev = float(ema_slow.iloc[-2])
+            
+            # Direction from EMA position
+            if fast_now > slow_now:
                 direction = "UP"
-            elif instant_change < -0.0001:
+            elif fast_now < slow_now:
                 direction = "DOWN"
             else:
-                # Tiebreaker: use previous bar
-                if prev_change > 0:
-                    direction = "UP"
-                elif prev_change < 0:
-                    direction = "DOWN"
-                else:
-                    direction = "NEUTRAL"
+                direction = "NEUTRAL"
             
-            # STRENGTH: Use magnitude of instant change
-            # 0.1% move = 0.5 strength, 0.2% move = 1.0 strength
-            strength = min(1.0, abs(instant_change) / 0.002)
+            # Calculate strength (EMA separation normalized by price)
+            current_price = float(close.iloc[-1])
+            ema_separation = abs(fast_now - slow_now)
+            raw_strength = min(1.0, (ema_separation / current_price) * 500)  # 0.2% sep = full strength
             
-            # Boost if both bars agree
-            if (instant_change > 0 and prev_change > 0) or (instant_change < 0 and prev_change < 0):
-                strength = min(1.0, strength * 1.5)
+            # Boost if EMAs are diverging (trend accelerating)
+            prev_sep = abs(fast_prev - slow_prev)
+            if ema_separation > prev_sep:
+                strength = min(1.0, raw_strength * 1.3)
+            else:
+                strength = raw_strength
             
-            logger.debug("INSTANT Trend: direction=%s, strength=%.2f, instant_change=%.4f%%", 
-                        direction, strength, instant_change * 100)
+            logger.debug("EMA Trend: direction=%s, strength=%.2f, fast=%.2f, slow=%.2f", 
+                        direction, strength, fast_now, slow_now)
             
             return direction, round(strength, 3)
             

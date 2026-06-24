@@ -67,7 +67,7 @@ class BarbellStrategy:
     
     # Cooldown tracking to prevent overtrading
     _last_trade_time: Dict[str, datetime] = {}
-    COOLDOWN_MINUTES: int = 10  # PATIENT HAIL MARY: Wait for high-quality setups
+    COOLDOWN_MINUTES: int = 5  # 5 min cooldown - balanced
 
     def __init__(
         self,
@@ -166,12 +166,12 @@ class BarbellStrategy:
                     existing_positions[pos.symbol] = direction
 
             # Step 1: Calculate trend strength for all symbols and compute dynamic weights
-            # Using M1 for INSTANT trend response - catch reversals in real time!
+            # Using M15 for STABLE trend - stop flip-flopping on noise!
             trend_data = {}
             total_trend_score = 0.0
             for symbol in self.symbols:
                 try:
-                    candles = client.get_candles(symbol, mt5.TIMEFRAME_M1, 30)
+                    candles = client.get_candles(symbol, mt5.TIMEFRAME_M15, 30)
                     direction, strength = calculate_trend_strength(candles)
                     # Check for rapid price movement
                     declining = is_rapid_decline(candles, threshold=0.003, bars=4)
@@ -265,9 +265,9 @@ class BarbellStrategy:
                         logger.info("Skipping %s - trend is NEUTRAL (no edge)", symbol)
                         continue
                     
-                    # PATIENT HAIL MARY: Only trade STRONG trends (0.7+)
-                    if trend_strength < 0.7:
-                        logger.info("Skipping %s - trend strength %.2f < 0.7 (waiting for conviction)", symbol, trend_strength)
+                    # Trade with ANY clear trend (removed 0.7 filter - too strict)
+                    if trend_strength < 0.3:
+                        logger.info("Skipping %s - trend strength %.2f < 0.3 (no clear trend)", symbol, trend_strength)
                         continue
                     
                     # RAPID MOVEMENT FILTER: Don't counter-trade extreme moves
@@ -291,12 +291,12 @@ class BarbellStrategy:
                         logger.warning("ATR calculation failed for %s, using fallback volatility", symbol)
                         atr = float(entry_price) * 0.01
 
-                    # PATIENT HAIL MARY: 0.3x ATR SL (cut fast), 1.5x ATR TP (5:1 R:R)
+                    # 0.5x ATR SL, 1.5x ATR TP (3:1 R:R) - stops were too tight
                     if action == "BUY":
-                        stop_loss = float(entry_price - atr * 0.3)
+                        stop_loss = float(entry_price - atr * 0.5)
                         take_profit = float(entry_price + atr * 1.5)
                     else:
-                        stop_loss = float(entry_price + atr * 0.3)
+                        stop_loss = float(entry_price + atr * 0.5)
                         take_profit = float(entry_price - atr * 1.5)
                     
                     # SANITY CHECK: TP must be profitable
