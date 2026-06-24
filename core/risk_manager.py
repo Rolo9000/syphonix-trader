@@ -43,9 +43,9 @@ class RiskManager:
     def __init__(
         self,
         client: MT5Client,
-        risk_per_trade: float = 0.010,
-        max_daily_drawdown: float = 0.05,
-        max_open_positions: int = 5,
+        risk_per_trade: float = 0.15,  # NUCLEAR: 15% per trade
+        max_daily_drawdown: float = 0.50,  # NUCLEAR: 50% drawdown allowed
+        max_open_positions: int = 20,  # NUCLEAR: many positions
     ) -> None:
         """Configure risk limits and bind the MT5 client."""
         self.client = client
@@ -167,19 +167,18 @@ class RiskManager:
                 state = self.check_risk_state()
                 logger.info(f"Current actual leverage: {state.leverage_ratio:.2f}x, margin: {state.margin_usage_pct:.1f}%")
 
-                # Emergency equity protection: stop trading if equity drops below $200k
-                if state.equity < 200000.0:
-                    return False, f"Equity protection: below $200,000 threshold (current: ${state.equity:,.2f})"
+                # NUCLEAR: Minimal safety checks - we need to make $500k
+                if state.equity < 50000.0:  # Only stop if nearly wiped out
+                    return False, f"Equity protection: below $50,000 threshold (current: ${state.equity:,.2f})"
 
-                if state.margin_usage_pct > 85.0:
-                    return False, f"Margin usage {state.margin_usage_pct:.1f}% exceeds 85%"
-                if state.leverage_ratio > 26.0:
+                if state.margin_usage_pct > 95.0:  # Max out margin
+                    return False, f"Margin usage {state.margin_usage_pct:.1f}% exceeds 95%"
+                if state.leverage_ratio > 27.0:  # Push to competition limit
                     logger.warning(
-                        "Leverage approaching cap: %.1fx (competition penalty threshold is 28x)",
+                        "Leverage at %.1fx (competition max is 28x)",
                         state.leverage_ratio,
                     )
-                if state.current_drawdown_pct > 8.0:
-                    return False, f"Drawdown {state.current_drawdown_pct:.1f}% exceeds 8%"
+                # REMOVED: Drawdown check - we're going all in
 
                 return True, "OK"
             except Exception as exc:

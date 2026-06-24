@@ -106,6 +106,9 @@ async def trailing_stop_manager(client: MT5Client) -> None:
             logger.exception("Trailing stop manager failed")
 
 
+# Global flag to track if we've hit the victory condition
+_VICTORY_ACHIEVED = False
+
 async def execute_trading_cycle(
     client: MT5Client,
     risk_manager: RiskManager,
@@ -113,11 +116,33 @@ async def execute_trading_cycle(
     asian_breakout: AsianBreakoutStrategy,
     barbell: BarbellStrategy,
 ) -> None:
+    global _VICTORY_ACHIEVED
     with _span("main.execute_trading_cycle"):
 
         if state_store.is_emergency_stop():
             logger.warning("Emergency stop is active; skipping trading cycle")
             return
+
+        # 🏆 VICTORY CONDITION: If equity >= $1M, we WIN - close everything and stop
+        if not _VICTORY_ACHIEVED:
+            try:
+                risk_state = risk_manager.check_risk_state()
+                if risk_state.equity >= 1000000.0:
+                    logger.critical("🏆🏆🏆 VICTORY! Equity reached $%.2f - CLOSING ALL POSITIONS 🏆🏆🏆", risk_state.equity)
+                    # Close all positions to lock in the win
+                    close_results = client.close_all_positions()
+                    for result in close_results:
+                        if result.success:
+                            logger.info("Closed position: ticket=%s", result.ticket)
+                        else:
+                            logger.warning("Failed to close position: %s", result.error_message)
+                    # Set emergency stop to prevent any more trading
+                    state_store.set_emergency_stop(True)
+                    _VICTORY_ACHIEVED = True
+                    logger.critical("🎉 ALL TRADING STOPPED - WE WON! Final equity: $%.2f 🎉", risk_state.equity)
+                    return
+            except Exception as exc:
+                logger.warning("Victory check failed: %s", exc)
 
         safe, reason = risk_manager.is_safe_to_trade()
         if not safe:

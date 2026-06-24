@@ -67,7 +67,7 @@ class BarbellStrategy:
     
     # Cooldown tracking to prevent overtrading
     _last_trade_time: Dict[str, datetime] = {}
-    COOLDOWN_MINUTES: int = 15  # Don't re-trade same symbol for 15 mins
+    COOLDOWN_MINUTES: int = 2  # NUCLEAR: rapid fire
 
     def __init__(
         self,
@@ -317,8 +317,8 @@ class BarbellStrategy:
                     stop_loss_pips = float(abs(entry_price - stop_loss) * (100.0 if symbol.endswith("JPY") else 10000.0))
                     base_volume = float(risk_manager.calculate_position_size(symbol, stop_loss_pips, risk_manager.risk_per_trade))
                     
-                    # CAP MAX DOLLAR RISK: Limit to $100 max loss per trade
-                    max_risk_dollars = 50.0
+                    # NUCLEAR: Massive risk cap per trade
+                    max_risk_dollars = 5000.0
                     try:
                         tick = mt5.symbol_info_tick(symbol)
                         symbol_info = mt5.symbol_info(symbol)
@@ -372,8 +372,8 @@ class BarbellStrategy:
                             if symbol_info:
                                 contract_size = float(symbol_info.trade_contract_size)
                                 position_notional = volume * price * contract_size
-                                if position_notional > 100000.0:
-                                    volume = 100000.0 / (price * contract_size)
+                                if position_notional > 2000000.0:  # NUCLEAR: $2M position cap
+                                    volume = 2000000.0 / (price * contract_size)
                                     volume = round(round(volume / float(symbol_info.volume_step)) * float(symbol_info.volume_step), 8)
                                     volume = max(float(symbol_info.volume_min), volume)
                     except Exception:

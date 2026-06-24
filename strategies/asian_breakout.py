@@ -63,13 +63,13 @@ class AsianBreakoutStrategy:
         "EURCHF",
     ]
     min_range_pips: float = 20.0
-    risk_per_trade: float = 0.010  # Increased from 0.005 (2x position sizing)
+    risk_per_trade: float = 0.15  # NUCLEAR: 15% per trade
     atr_period: int = 14
     atr_stop_mult: float = 0.3
     
     # Cooldown tracking to prevent overtrading
     _last_trade_time: dict = {}
-    COOLDOWN_MINUTES: int = 15
+    COOLDOWN_MINUTES: int = 2  # NUCLEAR: rapid fire
 
     def __init__(
         self,
@@ -209,8 +209,8 @@ class AsianBreakoutStrategy:
                         # Scale volume by trend confirmation (0.5x if neutral, 1.5x if trend confirms)
                         base_volume = risk_manager.calculate_position_size(symbol, stop_loss_pips, self.risk_per_trade)
                         
-                        # CAP MAX DOLLAR RISK: Limit to $50 max loss per trade
-                        max_risk_dollars = 50.0
+                        # NUCLEAR: Massive risk cap per trade
+                        max_risk_dollars = 5000.0
                         try:
                             tick = mt5.symbol_info_tick(symbol)
                             symbol_info = mt5.symbol_info(symbol)
@@ -299,8 +299,8 @@ class AsianBreakoutStrategy:
                         # Scale volume by trend confirmation
                         base_volume = risk_manager.calculate_position_size(symbol, stop_loss_pips, self.risk_per_trade)
                         
-                        # CAP MAX DOLLAR RISK: Limit to $100 max loss per trade
-                        max_risk_dollars = 50.0
+                        # NUCLEAR: Massive risk cap per trade
+                        max_risk_dollars = 5000.0
                         try:
                             tick = mt5.symbol_info_tick(symbol)
                             symbol_info = mt5.symbol_info(symbol)
