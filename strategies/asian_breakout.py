@@ -172,19 +172,11 @@ class AsianBreakoutStrategy:
                     bid, ask = client.get_current_price(symbol)
                     spread = float(ask - bid)
                     
-                    # Only take bullish breakout if trend is UP or NEUTRAL (not against DOWN trend)
+                    # NUCLEAR: Take breakouts WITH momentum, skip if against
                     if bullish_sweep and market_structure == "BULLISH_MSS":
-                        # WIN RATE FILTER: Skip weak/choppy markets
-                        if trend_strength < 0.2:
-                            logger.info("Skipping bullish breakout on %s - trend too weak (strength=%.2f)", symbol, trend_strength)
-                            continue
-                        # WIN RATE FILTER: NEVER trade against trend
-                        if trend_direction == "DOWN":
-                            logger.info("Skipping bullish breakout on %s - against DOWN trend", symbol)
-                            continue
-                        # Don't buy into falling knife
-                        if declining:
-                            logger.info("Skipping bullish breakout on %s - rapid decline detected", symbol)
+                        # Only skip if actively falling - trust the breakout signal otherwise
+                        if trend_direction == "DOWN" and declining:
+                            logger.info("Skipping bullish breakout on %s - active decline", symbol)
                             continue
                         
                         entry = current_close
@@ -227,18 +219,13 @@ class AsianBreakoutStrategy:
                         volume = base_volume * (0.5 + trend_strength * 1.0)  # 0.5x to 1.5x
                         signal_confidence = 0.70 + (trend_strength * 0.25)
                         
-                        # WIN RATE FILTER: SKIP if sentiment opposes (not just reduce)
+                        # NUCLEAR: Sentiment boosts only, never blocks
                         if state_store is not None:
                             try:
                                 sentiment_result = state_store.get_sentiment(symbol)
-                                if sentiment_result:
-                                    sentiment = sentiment_result.sentiment.upper()
-                                    if sentiment == "BULLISH":
-                                        volume = volume * 1.30
-                                        logger.info("%s BULLISH sentiment aligns with BUY - boosting volume 30%%", symbol)
-                                    elif sentiment == "BEARISH":
-                                        logger.info("%s BEARISH sentiment opposes BUY - SKIPPING trade", symbol)
-                                        continue
+                                if sentiment_result and sentiment_result.sentiment.upper() == "BULLISH":
+                                    volume = volume * 1.50
+                                    logger.info("%s BULLISH sentiment - boosting BUY 50%%", symbol)
                             except Exception:
                                 pass
                         
@@ -265,16 +252,9 @@ class AsianBreakoutStrategy:
                     # Only take bearish breakout if trend is DOWN or NEUTRAL (not against UP trend)
                     elif bearish_sweep and market_structure == "BEARISH_MSS":
                         # WIN RATE FILTER: Skip weak/choppy markets
-                        if trend_strength < 0.2:
-                            logger.info("Skipping bearish breakout on %s - trend too weak (strength=%.2f)", symbol, trend_strength)
-                            continue
-                        # WIN RATE FILTER: NEVER trade against trend
-                        if trend_direction == "UP":
-                            logger.info("Skipping bearish breakout on %s - against UP trend", symbol)
-                            continue
-                        # Don't sell into rallying market
-                        if rallying:
-                            logger.info("Skipping bearish breakout on %s - rapid rally detected", symbol)
+                        # NUCLEAR: Only skip if actively rallying against us
+                        if trend_direction == "UP" and rallying:
+                            logger.info("Skipping bearish breakout on %s - active rally", symbol)
                             continue
                         
                         entry = current_close
@@ -317,18 +297,13 @@ class AsianBreakoutStrategy:
                         volume = base_volume * (0.5 + trend_strength * 1.0)  # 0.5x to 1.5x
                         signal_confidence = 0.70 + (trend_strength * 0.25)
                         
-                        # WIN RATE FILTER: SKIP if sentiment opposes (not just reduce)
+                        # NUCLEAR: Sentiment boosts only, never blocks
                         if state_store is not None:
                             try:
                                 sentiment_result = state_store.get_sentiment(symbol)
-                                if sentiment_result:
-                                    sentiment = sentiment_result.sentiment.upper()
-                                    if sentiment == "BEARISH":
-                                        volume = volume * 1.30
-                                        logger.info("%s BEARISH sentiment aligns with SELL - boosting volume 30%%", symbol)
-                                    elif sentiment == "BULLISH":
-                                        logger.info("%s BULLISH sentiment opposes SELL - SKIPPING trade", symbol)
-                                        continue
+                                if sentiment_result and sentiment_result.sentiment.upper() == "BEARISH":
+                                    volume = volume * 1.50
+                                    logger.info("%s BEARISH sentiment - boosting SELL 50%%", symbol)
                             except Exception:
                                 pass
                         

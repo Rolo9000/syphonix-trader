@@ -111,7 +111,7 @@ def is_rapid_rally(df: pd.DataFrame, threshold: float = 0.003, bars: int = 4) ->
 
 
 def calculate_trend_strength(df: pd.DataFrame, fast_period: int = 5, slow_period: int = 13) -> tuple[str, float]:
-    """Calculate trend direction and strength using EMA crossover and momentum.
+    """Calculate trend direction and strength using IMMEDIATE MOMENTUM (not lagging EMAs).
     
     Returns:
         tuple: (direction, strength) where:
@@ -119,9 +119,9 @@ def calculate_trend_strength(df: pd.DataFrame, fast_period: int = 5, slow_period
             - strength: 0.0 to 1.0 (0 = no trend, 1 = strong trend)
     
     Strategy:
-        - EMA crossover determines direction (faster 5/13 periods)
-        - Distance between EMAs relative to ATR determines strength
-        - Recent price momentum confirms trend
+        - IMMEDIATE: Compare price now vs 3 bars ago (catches reversals fast)
+        - CONFIRMATION: Check if last 3 closes are trending same direction
+        - Only use EMAs as secondary confirmation
     """
     with _span("calculate_trend_strength"):
         try:
@@ -129,23 +129,34 @@ def calculate_trend_strength(df: pd.DataFrame, fast_period: int = 5, slow_period
                 return "NEUTRAL", 0.0
             
             close = df["close"].astype(float)
-            
-            # Calculate EMAs
-            ema_fast = close.ewm(span=fast_period, adjust=False).mean()
-            ema_slow = close.ewm(span=slow_period, adjust=False).mean()
-            
-            # Current EMA values
-            fast_now = float(ema_fast.iloc[-1])
-            slow_now = float(ema_slow.iloc[-1])
             current_price = float(close.iloc[-1])
             
-            # Direction from EMA crossover
-            if fast_now > slow_now and current_price > fast_now:
+            # IMMEDIATE MOMENTUM: Price vs 3 bars ago (most important!)
+            price_3_ago = float(close.iloc[-4]) if len(close) > 3 else current_price
+            immediate_change = (current_price - price_3_ago) / price_3_ago if price_3_ago != 0 else 0.0
+            
+            # COUNT RECENT DIRECTION: How many of last 3 bars were up vs down?
+            up_bars = 0
+            down_bars = 0
+            for i in range(-3, 0):
+                if close.iloc[i] > close.iloc[i-1]:
+                    up_bars += 1
+                elif close.iloc[i] < close.iloc[i-1]:
+                    down_bars += 1
+            
+            # IMMEDIATE DIRECTION from recent price action
+            if immediate_change > 0.001 and up_bars >= 2:
                 direction = "UP"
-            elif fast_now < slow_now and current_price < fast_now:
+            elif immediate_change < -0.001 and down_bars >= 2:
                 direction = "DOWN"
             else:
                 direction = "NEUTRAL"
+            
+            # Calculate EMAs for strength only (not direction)
+            ema_fast = close.ewm(span=fast_period, adjust=False).mean()
+            ema_slow = close.ewm(span=slow_period, adjust=False).mean()
+            fast_now = float(ema_fast.iloc[-1])
+            slow_now = float(ema_slow.iloc[-1])
             
             # Calculate strength (EMA separation normalized by ATR)
             try:

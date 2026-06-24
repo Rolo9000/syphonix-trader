@@ -240,45 +240,40 @@ class BarbellStrategy:
                                         symbol, self.COOLDOWN_MINUTES - minutes_since)
                             continue
                     
-                    # RAPID MOVEMENT FILTER: Don't buy into falling knife, don't sell into rally
+                    # NUCLEAR: OVERRIDE rebalancing logic - ONLY trade WITH momentum
+                    # If trend is DOWN, only allow SELL (even if rebalance wants BUY)
+                    # If trend is UP, only allow BUY (even if rebalance wants SELL)
+                    if trend_direction == "DOWN":
+                        if raw_action == "BUY":
+                            logger.info("OVERRIDE: Skipping BUY %s - trend is DOWN, flipping to momentum mode", symbol)
+                            # Instead of skipping, flip to SELL if we don't have a SELL position
+                            if symbol not in existing_positions or existing_positions[symbol] != "SELL":
+                                raw_action = "SELL"
+                                logger.info("FLIPPED to SELL %s - following DOWN momentum", symbol)
+                            else:
+                                continue
+                    elif trend_direction == "UP":
+                        if raw_action == "SELL":
+                            logger.info("OVERRIDE: Skipping SELL %s - trend is UP, flipping to momentum mode", symbol)
+                            if symbol not in existing_positions or existing_positions[symbol] != "BUY":
+                                raw_action = "BUY"
+                                logger.info("FLIPPED to BUY %s - following UP momentum", symbol)
+                            else:
+                                continue
+                    else:
+                        # NEUTRAL trend - skip entirely (no edge)
+                        logger.info("Skipping %s - trend is NEUTRAL (no edge)", symbol)
+                        continue
+                    
+                    # RAPID MOVEMENT FILTER: Don't counter-trade extreme moves
                     if raw_action == "BUY" and trend_data[symbol].get("declining", False):
-                        logger.info("Skipping BUY %s - rapid decline detected (price dropping fast)", symbol)
+                        logger.info("Skipping BUY %s - rapid decline detected", symbol)
                         continue
                     if raw_action == "SELL" and trend_data[symbol].get("rallying", False):
-                        logger.info("Skipping SELL %s - rapid rally detected (price rising fast)", symbol)
+                        logger.info("Skipping SELL %s - rapid rally detected", symbol)
                         continue
                     
-                    # WIN RATE FILTER 1: Skip choppy/weak markets - need minimum trend strength
-                    if trend_strength < 0.25:
-                        logger.info("Skipping %s %s - trend too weak (strength=%.2f < 0.25)",
-                                   raw_action, symbol, trend_strength)
-                        continue
-                    
-                    # WIN RATE FILTER 2: NEVER trade against the trend
-                    if (trend_direction == "UP" and raw_action == "SELL") or \
-                       (trend_direction == "DOWN" and raw_action == "BUY"):
-                        logger.info("Skipping %s %s - against trend (%s)",
-                                   raw_action, symbol, trend_direction)
-                        continue
-                    
-                    # PULLBACK FILTER: Don't chase - wait for price to pull back before entering
-                    candles = client.get_candles(symbol, mt5.TIMEFRAME_M15, 10)
-                    if len(candles) >= 5:
-                        recent_high = float(candles["high"].iloc[-5:].max())
-                        recent_low = float(candles["low"].iloc[-5:].min())
-                        if raw_action == "BUY":
-                            # Don't buy if current price is within 0.1% of recent high
-                            if current_price > recent_high * 0.999:
-                                logger.info("Skipping BUY %s - price %.5f too close to recent high %.5f", 
-                                           symbol, current_price, recent_high)
-                                continue
-                        else:  # SELL
-                            # Don't sell if current price is within 0.1% of recent low
-                            if current_price < recent_low * 1.001:
-                                logger.info("Skipping SELL %s - price %.5f too close to recent low %.5f", 
-                                           symbol, current_price, recent_low)
-                                continue
-                    
+                    # NUCLEAR: Removed pullback filter - we're momentum trading now, ride the wave!
                     action = raw_action
                     entry_price = float(current_price)
                     
@@ -337,27 +332,20 @@ class BarbellStrategy:
                     confidence_multiplier = 0.5 + (trend_strength * 1.0)  # Range: 0.5 to 1.5
                     volume = base_volume * confidence_multiplier
                     
-                    # Sentiment boost: +30% when sentiment aligns with trend/action
+                    # NUCLEAR: Sentiment only boosts, never blocks - we trust price action
                     sentiment_boost = 1.0
                     if state_store is not None:
                         try:
                             sentiment_result = state_store.get_sentiment(symbol)
                             if sentiment_result:
                                 sentiment = sentiment_result.sentiment.upper()
-                                # Boost if sentiment aligns with action
                                 if (sentiment == "BULLISH" and action == "BUY") or \
                                    (sentiment == "BEARISH" and action == "SELL"):
-                                    sentiment_boost = 1.30  # +30% volume
-                                    logger.info("%s sentiment %s aligns with %s - boosting volume 30%%",
+                                    sentiment_boost = 1.50  # +50% volume when aligned
+                                    logger.info("%s sentiment %s confirms %s - boosting volume 50%%",
                                                symbol, sentiment, action)
-                                # WIN RATE FILTER 3: SKIP if sentiment opposes action (don't just reduce)
-                                elif (sentiment == "BULLISH" and action == "SELL") or \
-                                     (sentiment == "BEARISH" and action == "BUY"):
-                                    logger.info("%s sentiment %s opposes %s - SKIPPING trade",
-                                               symbol, sentiment, action)
-                                    continue
                         except Exception:
-                            pass  # Sentiment unavailable, use default
+                            pass
                     volume = volume * sentiment_boost
                     
                     if volume <= 0.0:
