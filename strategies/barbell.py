@@ -67,7 +67,7 @@ class BarbellStrategy:
     
     # Cooldown tracking to prevent overtrading
     _last_trade_time: Dict[str, datetime] = {}
-    COOLDOWN_MINUTES: int = 2  # NUCLEAR: rapid fire
+    COOLDOWN_MINUTES: int = 10  # PATIENT HAIL MARY: Wait for high-quality setups
 
     def __init__(
         self,
@@ -265,6 +265,11 @@ class BarbellStrategy:
                         logger.info("Skipping %s - trend is NEUTRAL (no edge)", symbol)
                         continue
                     
+                    # PATIENT HAIL MARY: Only trade STRONG trends (0.7+)
+                    if trend_strength < 0.7:
+                        logger.info("Skipping %s - trend strength %.2f < 0.7 (waiting for conviction)", symbol, trend_strength)
+                        continue
+                    
                     # RAPID MOVEMENT FILTER: Don't counter-trade extreme moves
                     if raw_action == "BUY" and trend_data[symbol].get("declining", False):
                         logger.info("Skipping BUY %s - rapid decline detected", symbol)
@@ -286,13 +291,13 @@ class BarbellStrategy:
                         logger.warning("ATR calculation failed for %s, using fallback volatility", symbol)
                         atr = float(entry_price) * 0.01
 
-                    # Tighter stops for better R:R: 0.5x ATR SL, 1.0x ATR TP (2:1 R:R)
+                    # PATIENT HAIL MARY: 0.3x ATR SL (cut fast), 1.5x ATR TP (5:1 R:R)
                     if action == "BUY":
-                        stop_loss = float(entry_price - atr * 0.5)
-                        take_profit = float(entry_price + atr * 1.0)
+                        stop_loss = float(entry_price - atr * 0.3)
+                        take_profit = float(entry_price + atr * 1.5)
                     else:
-                        stop_loss = float(entry_price + atr * 0.5)
-                        take_profit = float(entry_price - atr * 1.0)
+                        stop_loss = float(entry_price + atr * 0.3)
+                        take_profit = float(entry_price - atr * 1.5)
                     
                     # SANITY CHECK: TP must be profitable
                     if action == "BUY" and take_profit <= entry_price:

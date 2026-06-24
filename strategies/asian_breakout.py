@@ -69,7 +69,7 @@ class AsianBreakoutStrategy:
     
     # Cooldown tracking to prevent overtrading
     _last_trade_time: dict = {}
-    COOLDOWN_MINUTES: int = 2  # NUCLEAR: rapid fire
+    COOLDOWN_MINUTES: int = 10  # PATIENT HAIL MARY: Wait for high-quality setups
 
     def __init__(
         self,
@@ -172,7 +172,12 @@ class AsianBreakoutStrategy:
                     bid, ask = client.get_current_price(symbol)
                     spread = float(ask - bid)
                     
-                    # NUCLEAR: Take breakouts WITH momentum, skip if against
+                    # PATIENT HAIL MARY: Only trade STRONG trends (0.7+)
+                    if trend_strength < 0.7:
+                        logger.info("Skipping %s - trend strength %.2f < 0.7 (waiting for conviction)", symbol, trend_strength)
+                        continue
+                    
+                    # Take breakouts WITH momentum, skip if against
                     if bullish_sweep and market_structure == "BULLISH_MSS":
                         # Only skip if actively falling - trust the breakout signal otherwise
                         if trend_direction == "DOWN" and declining:
@@ -182,7 +187,7 @@ class AsianBreakoutStrategy:
                         entry = current_close
                         atr_value = calculate_atr(candles, self.atr_period)
                         stop_loss = current_low - atr_value * 0.3  # Tighter SL
-                        take_profit = entry + range_width * 0.8  # Tighter TP, trailing handles big moves
+                        take_profit = entry + range_width * 1.5  # PATIENT: Bigger TP, trailing locks profits
                         
                         # SANITY CHECK: TP must be above entry for BUY
                         if take_profit <= entry:
@@ -260,7 +265,7 @@ class AsianBreakoutStrategy:
                         entry = current_close
                         atr_value = calculate_atr(candles, self.atr_period)
                         stop_loss = current_high + atr_value * 0.3  # Tighter SL
-                        take_profit = entry - range_width * 0.8  # Tighter TP, trailing handles big moves
+                        take_profit = entry - range_width * 1.5  # PATIENT: Bigger TP, trailing locks profits
                         
                         # SANITY CHECK: TP must be below entry for SELL
                         if take_profit >= entry:
