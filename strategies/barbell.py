@@ -48,7 +48,7 @@ class BarbellStrategy:
 
     symbols: List[str] = [
         "XAUUSD",
-        # "XAGUSD",  # Excluded - existing position we want to let ride
+        "XAGUSD",  # Silver added!
         "BTCUSD",
         "ETHUSD",
         "SOLUSD",
@@ -56,12 +56,12 @@ class BarbellStrategy:
     ]
     rebalance_threshold: float = 0.10
     target_weights: Dict[str, float] = {
-        "XAUUSD": 0.35,   # Boosted from 0.30
-        # "XAGUSD": 0.10, # Excluded
-        "BTCUSD": 0.30,   # Boosted from 0.25
-        "ETHUSD": 0.15,
-        "SOLUSD": 0.10,
-        "XRPUSD": 0.10,
+        "XAUUSD": 0.30,   # Gold
+        "XAGUSD": 0.10,   # Silver
+        "BTCUSD": 0.25,   # Bitcoin
+        "ETHUSD": 0.15,   # Ethereum
+        "SOLUSD": 0.10,   # Solana
+        "XRPUSD": 0.10,   # XRP
     }
     total_allocation_pct: float = 0.35  # Increased from 0.25 (40% more capital)
     
