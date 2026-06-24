@@ -144,13 +144,13 @@ class AsianBreakoutStrategy:
                         logger.debug("No M5 candles for %s", symbol)
                         continue
 
-                    # Get M15 candles for trend detection (faster than H1)
+                    # Get M1 candles for INSTANT trend detection
                     try:
-                        m15_candles = client.get_candles(symbol, mt5.TIMEFRAME_M15, 30)
-                        trend_direction, trend_strength = calculate_trend_strength(m15_candles)
+                        m1_candles = client.get_candles(symbol, mt5.TIMEFRAME_M1, 30)
+                        trend_direction, trend_strength = calculate_trend_strength(m1_candles)
                         # Check rapid price movement
-                        declining = is_rapid_decline(m15_candles, threshold=0.003, bars=4)
-                        rallying = is_rapid_rally(m15_candles, threshold=0.003, bars=4)
+                        declining = is_rapid_decline(m1_candles, threshold=0.002, bars=3)
+                        rallying = is_rapid_rally(m1_candles, threshold=0.002, bars=3)
                     except Exception:
                         trend_direction, trend_strength = "NEUTRAL", 0.0
                         declining, rallying = False, False

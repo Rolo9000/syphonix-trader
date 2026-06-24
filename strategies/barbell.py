@@ -166,12 +166,12 @@ class BarbellStrategy:
                     existing_positions[pos.symbol] = direction
 
             # Step 1: Calculate trend strength for all symbols and compute dynamic weights
-            # Using M15 for faster trend response (was H1 which lagged badly)
+            # Using M1 for INSTANT trend response - catch reversals in real time!
             trend_data = {}
             total_trend_score = 0.0
             for symbol in self.symbols:
                 try:
-                    candles = client.get_candles(symbol, mt5.TIMEFRAME_M15, 30)
+                    candles = client.get_candles(symbol, mt5.TIMEFRAME_M1, 30)
                     direction, strength = calculate_trend_strength(candles)
                     # Check for rapid price movement
                     declining = is_rapid_decline(candles, threshold=0.003, bars=4)
@@ -227,9 +227,9 @@ class BarbellStrategy:
                     # Determine action - but only trade WITH the trend if trend is strong
                     raw_action = "BUY" if notional_diff > 0 else "SELL"
                     
-                    # CRITICAL: Don't stack positions in the same direction
-                    if symbol in existing_positions and existing_positions[symbol] == raw_action:
-                        logger.debug("Skipping %s %s - already have %s position", raw_action, symbol, raw_action)
+                    # CRITICAL: Don't stack ANY positions on same symbol
+                    if symbol in existing_positions:
+                        logger.debug("Skipping %s %s - already have position on this symbol", raw_action, symbol)
                         continue
                     
                     # COOLDOWN CHECK: Don't re-trade same symbol too quickly

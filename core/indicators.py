@@ -111,76 +111,57 @@ def is_rapid_rally(df: pd.DataFrame, threshold: float = 0.003, bars: int = 4) ->
 
 
 def calculate_trend_strength(df: pd.DataFrame, fast_period: int = 5, slow_period: int = 13) -> tuple[str, float]:
-    """Calculate trend direction and strength using IMMEDIATE MOMENTUM (not lagging EMAs).
+    """Calculate trend direction using INSTANT MOMENTUM (2 bars only).
     
     Returns:
         tuple: (direction, strength) where:
             - direction: "UP", "DOWN", or "NEUTRAL"
             - strength: 0.0 to 1.0 (0 = no trend, 1 = strong trend)
     
-    Strategy:
-        - IMMEDIATE: Compare price now vs 3 bars ago (catches reversals fast)
-        - CONFIRMATION: Check if last 3 closes are trending same direction
-        - Only use EMAs as secondary confirmation
+    NUCLEAR Strategy:
+        - INSTANT: Just look at last 2 closes - if going up, UP. If going down, DOWN.
+        - No confirmation needed - we want SPEED over accuracy
+        - On M1 timeframe this means we react within seconds
     """
     with _span("calculate_trend_strength"):
         try:
-            if len(df) < slow_period + 5:
+            if len(df) < 5:
                 return "NEUTRAL", 0.0
             
             close = df["close"].astype(float)
             current_price = float(close.iloc[-1])
+            prev_price = float(close.iloc[-2])
+            prev2_price = float(close.iloc[-3])
             
-            # IMMEDIATE MOMENTUM: Price vs 3 bars ago (most important!)
-            price_3_ago = float(close.iloc[-4]) if len(close) > 3 else current_price
-            immediate_change = (current_price - price_3_ago) / price_3_ago if price_3_ago != 0 else 0.0
+            # INSTANT: Just compare last 2 prices
+            instant_change = (current_price - prev_price) / prev_price if prev_price != 0 else 0.0
+            prev_change = (prev_price - prev2_price) / prev2_price if prev2_price != 0 else 0.0
             
-            # COUNT RECENT DIRECTION: How many of last 3 bars were up vs down?
-            up_bars = 0
-            down_bars = 0
-            for i in range(-3, 0):
-                if close.iloc[i] > close.iloc[i-1]:
-                    up_bars += 1
-                elif close.iloc[i] < close.iloc[i-1]:
-                    down_bars += 1
-            
-            # IMMEDIATE DIRECTION from recent price action
-            if immediate_change > 0.001 and up_bars >= 2:
+            # ULTRA-SIMPLE: If price went up in last bar, UP. If down, DOWN.
+            # Threshold of 0.0001 = 0.01% (very sensitive)
+            if instant_change > 0.0001:
                 direction = "UP"
-            elif immediate_change < -0.001 and down_bars >= 2:
+            elif instant_change < -0.0001:
                 direction = "DOWN"
             else:
-                direction = "NEUTRAL"
+                # Tiebreaker: use previous bar
+                if prev_change > 0:
+                    direction = "UP"
+                elif prev_change < 0:
+                    direction = "DOWN"
+                else:
+                    direction = "NEUTRAL"
             
-            # Calculate EMAs for strength only (not direction)
-            ema_fast = close.ewm(span=fast_period, adjust=False).mean()
-            ema_slow = close.ewm(span=slow_period, adjust=False).mean()
-            fast_now = float(ema_fast.iloc[-1])
-            slow_now = float(ema_slow.iloc[-1])
+            # STRENGTH: Use magnitude of instant change
+            # 0.1% move = 0.5 strength, 0.2% move = 1.0 strength
+            strength = min(1.0, abs(instant_change) / 0.002)
             
-            # Calculate strength (EMA separation normalized by ATR)
-            try:
-                atr = calculate_atr(df, 14)
-                ema_separation = abs(fast_now - slow_now)
-                # Normalize: separation of 2x ATR = full strength
-                raw_strength = min(1.0, ema_separation / (atr * 2.0))
-            except Exception:
-                raw_strength = 0.3  # Fallback if ATR fails
+            # Boost if both bars agree
+            if (instant_change > 0 and prev_change > 0) or (instant_change < 0 and prev_change < 0):
+                strength = min(1.0, strength * 1.5)
             
-            # Momentum confirmation: price change over last 5 bars
-            price_5_ago = float(close.iloc[-6]) if len(close) > 5 else current_price
-            momentum = (current_price - price_5_ago) / price_5_ago if price_5_ago != 0 else 0.0
-            
-            # Boost strength if momentum confirms direction
-            if (direction == "UP" and momentum > 0.002) or (direction == "DOWN" and momentum < -0.002):
-                strength = min(1.0, raw_strength * 1.3)  # 30% boost for confirmation
-            elif (direction == "UP" and momentum < 0) or (direction == "DOWN" and momentum > 0):
-                strength = raw_strength * 0.5  # Halve if momentum contradicts
-            else:
-                strength = raw_strength
-            
-            logger.debug("Trend analysis: direction=%s, strength=%.2f, ema_sep=%.4f, momentum=%.4f", 
-                        direction, strength, ema_separation if 'ema_separation' in dir() else 0, momentum)
+            logger.debug("INSTANT Trend: direction=%s, strength=%.2f, instant_change=%.4f%%", 
+                        direction, strength, instant_change * 100)
             
             return direction, round(strength, 3)
             
